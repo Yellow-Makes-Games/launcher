@@ -164,13 +164,21 @@ class LauncherTest(unittest.TestCase):
                 app.remove_all()
             self.assertTrue(info.called and not asked.called)  # nothing left to remove
 
-    def test_bastion_tab_opens_the_websites(self):
+    def test_dropdown_switches_between_game_and_bastion(self):
         import launcher
-        config = core.load_config()
-        app = launcher.App([], tabs=config["tabs"])
+        self.publish("v0.1.0")
+        app = launcher.App([self.game], tabs=core.load_config()["tabs"])
         self.addCleanup(app.destroy)
-        names = [app.notebook.tab(t, "text") for t in app.notebook.tabs()]
-        self.assertEqual(names, ["Games", "Bastion"])
+        self.assertEqual(list(app.selector.cget("values")), ["Demo", "Bastion"])
+        self.assertEqual(app.selector.get(), "Demo")
+        self.assertTrue(app.pages["Demo"].winfo_manager())
+        self.assertFalse(app.pages["Bastion"].winfo_manager())
+
+        app.selector.current(1)
+        app.selector.event_generate("<<ComboboxSelected>>")
+        app.update()
+        self.assertTrue(app.pages["Bastion"].winfo_manager())
+        self.assertFalse(app.pages["Demo"].winfo_manager())
         with mock.patch("launcher.webbrowser.open") as opened:
             for button in app.link_buttons:
                 button.invoke()

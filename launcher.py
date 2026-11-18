@@ -13,6 +13,7 @@ from tkinter import messagebox, ttk
 import core
 
 WIDTH, HEIGHT = 960, 540
+ICON = Path(__file__).with_name("icon.ico")
 BACKGROUND = Path(__file__).with_name("background.png")  # 960x540, from Jumpy Shooty
 
 
@@ -129,6 +130,10 @@ class App(tk.Tk):
     def __init__(self, games, launcher_entry=None, tabs=()):
         super().__init__()
         self.title("Yellow Makes Games")
+        try:
+            self.iconbitmap(str(ICON))  # title bar and taskbar
+        except tk.TclError:
+            pass
         self.resizable(False, False)
         self.inbox = queue.Queue()  # worker threads must not touch tkinter
         self.drain()
@@ -148,21 +153,27 @@ class App(tk.Tk):
         if launcher_entry:
             core.remove_old_launcher()
             self.background(lambda: core.launcher_update(launcher_entry), self.launcher_checked)
-        self.notebook = ttk.Notebook(canvas)
-        canvas.create_window(36, HEIGHT - 36, anchor="sw", window=self.notebook, width=720)
-        panel = ttk.Frame(self.notebook)
-        self.notebook.add(panel, text="Games")
-        self.rows = [GameRow(self, panel, g) for g in games]
-        footer = ttk.Frame(panel)
-        footer.pack(pady=10)
-        ttk.Button(footer, text="Check again", command=lambda: [r.check() for r in self.rows]).pack(side="left", padx=4)
-        ttk.Button(footer, text="Remove all installs", command=self.remove_all).pack(side="left", padx=4)
+        # One page per game and per extra tab; the dropdown under the title picks
+        # which one the box at the bottom shows.
+        panel = ttk.Frame(canvas)
+        canvas.create_window(36, HEIGHT - 36, anchor="sw", window=panel, width=720)
+        self.pages = {}  # name in the dropdown -> its frame
+        self.rows = []
+        for game in games:
+            page = ttk.Frame(panel)
+            self.pages[game["name"]] = page
+            self.rows.append(GameRow(self, page, game))
+            footer = ttk.Frame(page)
+            footer.pack(pady=10)
+            ttk.Button(footer, text="Check again",
+                       command=lambda: [r.check() for r in self.rows]).pack(side="left", padx=4)
+            ttk.Button(footer, text="Remove all installs", command=self.remove_all).pack(side="left", padx=4)
 
-        # Extra tabs from games.json: a name plus buttons that open websites.
+        # Extra pages from games.json "tabs": a name plus buttons that open websites.
         self.link_buttons = []
         for tab in tabs:
-            page = ttk.Frame(self.notebook, padding=16)
-            self.notebook.add(page, text=tab["name"])
+            page = ttk.Frame(panel, padding=16)
+            self.pages[tab["name"]] = page
             for link in tab["links"]:
                 line = ttk.Frame(page)
                 line.pack(fill="x", pady=4)
@@ -171,6 +182,21 @@ class App(tk.Tk):
                 button.pack(side="left")
                 ttk.Label(line, text=link["url"].split("://", 1)[-1], font=("Segoe UI", 10)).pack(side="left", padx=10)
                 self.link_buttons.append(button)
+
+        self.selector = ttk.Combobox(canvas, state="readonly", values=list(self.pages),
+                                     width=20, font=("Segoe UI", 12))
+        self.selector.bind("<<ComboboxSelected>>", lambda e: self.show(self.selector.get()))
+        canvas.create_window(38, 84, anchor="nw", window=self.selector)
+        if self.pages:
+            self.show(next(iter(self.pages)))
+
+    def show(self, name):
+        """Put the named page in the box and select it in the dropdown."""
+        for page in self.pages.values():
+            page.pack_forget()
+        self.pages[name].pack(fill="x")
+        self.selector.set(name)
+        self.selector.selection_clear()
 
     def remove_all(self):
         installed = [r for r in self.rows if core.installed_version(r.game)]
@@ -229,5 +255,10 @@ class App(tk.Tk):
 
 
 if __name__ == "__main__":
+    try:  # own taskbar entry and icon when run from source, instead of Python's
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("YellowMakesGames.Launcher")
+    except (AttributeError, OSError):
+        pass
     config = core.load_config()
     App(config["games"], config.get("launcher"), config.get("tabs", ())).mainloop()
