@@ -103,6 +103,14 @@ class LauncherTest(unittest.TestCase):
             with self.assertRaises(core.LauncherError):
                 core.latest(game)
 
+    def test_network_errors_are_readable(self):
+        dead = {**self.game, "source": {"type": "manifest", "url": "http://no-such-host.invalid/latest.json"}}
+        with self.assertRaisesRegex(core.LauncherError, "Could not find the server"):
+            core.latest(dead)
+        missing = {**self.game, "source": {"type": "manifest", "url": f"{self.base}/nope.json"}}
+        with self.assertRaisesRegex(core.LauncherError, "error 404"):
+            core.latest(missing)
+
     def test_window(self):
         import launcher
         self.publish("v0.2.0")

@@ -69,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "$VERSION" >version.txt
-          python -m pip install --quiet pyinstaller
+          python -m pip install --quiet pyinstaller certifi
           pyinstaller --onefile --windowed --name YMGLauncher \
             --add-data "games.json;." --add-data "background.png;." --add-data "version.txt;." \
             launcher.py

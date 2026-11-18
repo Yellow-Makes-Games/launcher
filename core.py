@@ -8,8 +8,11 @@ import json
 import os
 import re
 import shutil
+import socket
+import ssl
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -53,7 +56,40 @@ def _open(url):
     if not url.lower().startswith(("https://", "http://")):
         raise LauncherError(f"Refusing non-http URL: {url}")
     req = urllib.request.Request(url, headers={"User-Agent": "ymg-launcher"})
-    return urllib.request.urlopen(req, timeout=20)
+    try:
+        return urllib.request.urlopen(req, timeout=20, context=_ssl_context())
+    except urllib.error.HTTPError as e:
+        if e.code in (403, 429):
+            raise LauncherError("GitHub is limiting requests from this network; try again in a while") from e
+        raise LauncherError(f"The server answered with error {e.code} for {url}") from e
+    except urllib.error.URLError as e:
+        reason = e.reason
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            raise LauncherError(f"The secure connection could not be verified ({reason.verify_message}); "
+                                "antivirus or a work/school network may be intercepting it") from e
+        if isinstance(reason, socket.gaierror):
+            raise LauncherError("Could not find the server; check the internet connection") from e
+        if isinstance(reason, (TimeoutError, ConnectionError)):
+            raise LauncherError(f"Could not connect to the server ({reason}); "
+                                "a firewall or proxy may be blocking the launcher") from e
+        raise LauncherError(f"Network error: {reason}") from e
+    except TimeoutError as e:
+        raise LauncherError("The server took too long to answer") from e
+
+
+def _ssl_context():
+    """Windows' certificates plus certifi's, when the build includes it.
+
+    Python only sees the root certificates Windows has already cached, so on
+    some PCs GitHub fails to verify with the system store alone.
+    """
+    ctx = ssl.create_default_context()
+    try:
+        import certifi
+        ctx.load_verify_locations(certifi.where())
+    except ImportError:
+        pass
+    return ctx
 
 
 def exe_path(game, version):
