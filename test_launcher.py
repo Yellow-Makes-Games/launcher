@@ -130,8 +130,13 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(unset.status.cget("text"), "Not installed · no update source set")
         self.assertEqual(str(unset.update_btn.cget("state")), "disabled")
 
+        self.assertFalse(row.folder_link.winfo_manager())  # no link until installed
         row.update_btn.invoke()
         wait_for("Installed v0.2.0 · up to date")
+        self.assertEqual(row.folder_link.winfo_manager(), "grid")
+        with mock.patch("launcher.os.startfile") as startfile:
+            row.open_folder()
+        self.assertEqual(startfile.call_args[0][0], core.exe_path(self.game, "v0.2.0").parent)
         self.assertEqual(str(row.play_btn.cget("state")), "normal")
         self.assertEqual(str(row.update_btn.cget("state")), "disabled")
 

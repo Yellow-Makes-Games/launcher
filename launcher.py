@@ -2,6 +2,7 @@
 
 Run with:  python launcher.py
 """
+import os
 import queue
 import threading
 from pathlib import Path
@@ -25,6 +26,9 @@ class GameRow:
         ttk.Label(frame, text=game["name"], font=("Segoe UI", 15, "bold")).grid(row=0, column=0, sticky="w")
         self.status = ttk.Label(frame, text="", font=("Segoe UI", 11))
         self.status.grid(row=1, column=0, sticky="w")
+        self.folder_link = ttk.Label(frame, text="Open game folder", foreground="#0a58ca",
+                                     cursor="hand2", font=("Segoe UI", 10, "underline"))
+        self.folder_link.bind("<Button-1>", lambda e: self.open_folder())
         self.bar = ttk.Progressbar(frame, length=220)
         self.update_btn = ttk.Button(frame, text="Install", command=self.start_install)
         self.update_btn.grid(row=0, column=1, rowspan=2, padx=(12, 6))
@@ -62,6 +66,15 @@ class GameRow:
         self.update_btn.config(text="Update" if have else "Install",
                                state="normal" if can_update else "disabled")
         self.play_btn.config(state="normal" if have and not busy else "disabled")
+        if have:
+            self.folder_link.grid(row=3, column=0, sticky="w", pady=(4, 0))
+        else:
+            self.folder_link.grid_remove()
+
+    def open_folder(self):
+        version = core.installed_version(self.game)
+        if version:
+            os.startfile(core.exe_path(self.game, version).parent)  # opens Explorer
 
     def start_install(self):
         version, url = self.latest
