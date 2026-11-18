@@ -1,0 +1,22 @@
+{
+  "launcher": {
+    "name": "Launcher",
+    "source": {
+      "type": "github_release",
+      "repo": "Yellow-Makes-Games/launcher",
+      "asset": "YMGLauncher.exe"
+    }
+  },
+  "games": [
+    {
+      "id": "jumpy-shooty",
+      "name": "Jumpy Shooty",
+      "exe": "JumpyShooty.exe",
+      "source": {
+        "type": "github_release",
+        "repo": "Yellow-Makes-Games/Jumpy-Shooty",
+        "asset": "JumpyShooty-windows-{version}.zip"
+      }
+    }
+  ]
+}

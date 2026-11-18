@@ -1,0 +1,88 @@
+name: Release
+
+# On every push to main: run the tests, pick the next vMAJOR.MINOR.PATCH, build
+# YMGLauncher.exe with that version baked in, and publish both as a GitHub
+# Release. Installed launchers find that release and update themselves.
+# Bumps patch by default; a "minor" or "major" label on the merged PR bumps
+# that part instead. The first version is v0.1.0.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test
+        run: python -m unittest -v
+
+      - name: Pick the version
+        run: |
+          set -euo pipefail
+          refs=$(gh api --paginate "repos/$REPO/git/matching-refs/tags/v" \
+            --jq '.[] | "\(.object.sha) \(.ref | sub("^refs/tags/"; ""))"')
+
+          # A re-run rebuilds the version this commit already has.
+          version=$(awk -v sha="$SHA" '$1 == sha && $2 ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ { print $2 }' <<<"$refs" | head -n1)
+          if [ -z "$version" ]; then
+            latest=$(awk '$2 ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ { print $2 }' <<<"$refs" | sort -V | tail -n1)
+            if [ -z "$latest" ]; then
+              version=v0.1.0
+            else
+              labels=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '.[].labels[].name')
+              IFS=. read -r major minor patch <<<"${latest#v}"
+              if grep -qix major <<<"$labels"; then
+                version="v$((major + 1)).0.0"
+              elif grep -qix minor <<<"$labels"; then
+                version="v$major.$((minor + 1)).0"
+              else
+                version="v$major.$minor.$((patch + 1))"
+              fi
+            fi
+          fi
+          echo "Version: $version"
+          echo "VERSION=$version" >>"$GITHUB_ENV"
+
+      - name: Build the exe
+        run: |
+          set -euo pipefail
+          echo "$VERSION" >version.txt
+          python -m pip install --quiet pyinstaller
+          pyinstaller --onefile --windowed --name YMGLauncher \
+            --add-data "games.json;." --add-data "background.png;." --add-data "version.txt;." \
+            launcher.py
+          test -s dist/YMGLauncher.exe
+
+      # The release is created with the exe already attached, so there is never
+      # a release without a download.
+      - name: Publish
+        run: |
+          set -euo pipefail
+          if gh release view "$VERSION" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$VERSION" dist/YMGLauncher.exe --repo "$REPO" --clobber
+          else
+            gh release create "$VERSION" dist/YMGLauncher.exe --repo "$REPO" --target "$SHA" --title "$VERSION" --generate-notes
+          fi
+          echo "Published YMGLauncher.exe as $VERSION" >>"$GITHUB_STEP_SUMMARY"
