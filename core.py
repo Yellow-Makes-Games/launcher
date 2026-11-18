@@ -36,7 +36,8 @@ def home():
 
 
 def load_config():
-    """games.json: {"launcher": <the launcher's own entry>, "games": [...]}."""
+    """games.json: {"launcher": <the launcher's own entry>, "games": [...],
+    "tabs": [{"name": ..., "links": [{"label": ..., "url": ...}]}]}."""
     return json.loads(GAMES_FILE.read_text(encoding="utf-8"))
 
 

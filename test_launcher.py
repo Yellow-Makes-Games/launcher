@@ -164,6 +164,19 @@ class LauncherTest(unittest.TestCase):
                 app.remove_all()
             self.assertTrue(info.called and not asked.called)  # nothing left to remove
 
+    def test_bastion_tab_opens_the_websites(self):
+        import launcher
+        config = core.load_config()
+        app = launcher.App([], tabs=config["tabs"])
+        self.addCleanup(app.destroy)
+        names = [app.notebook.tab(t, "text") for t in app.notebook.tabs()]
+        self.assertEqual(names, ["Games", "Bastion"])
+        with mock.patch("launcher.webbrowser.open") as opened:
+            for button in app.link_buttons:
+                button.invoke()
+        self.assertEqual([c.args[0] for c in opened.call_args_list],
+                         ["https://bastion.yellowmakes.games", "https://bastion-staging.yellowmakes.games"])
+
     def test_network_errors_are_readable(self):
         dead = {**self.game, "source": {"type": "manifest", "url": "http://no-such-host.invalid/latest.json"}}
         with self.assertRaisesRegex(core.LauncherError, "Could not find the server"):

@@ -5,6 +5,7 @@ Run with:  python launcher.py
 import os
 import queue
 import threading
+import webbrowser
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -125,7 +126,7 @@ class GameRow:
 
 
 class App(tk.Tk):
-    def __init__(self, games, launcher_entry=None):
+    def __init__(self, games, launcher_entry=None, tabs=()):
         super().__init__()
         self.title("Yellow Makes Games")
         self.resizable(False, False)
@@ -147,13 +148,29 @@ class App(tk.Tk):
         if launcher_entry:
             core.remove_old_launcher()
             self.background(lambda: core.launcher_update(launcher_entry), self.launcher_checked)
-        panel = ttk.Frame(canvas)
-        canvas.create_window(36, HEIGHT - 36, anchor="sw", window=panel, width=720)
+        self.notebook = ttk.Notebook(canvas)
+        canvas.create_window(36, HEIGHT - 36, anchor="sw", window=self.notebook, width=720)
+        panel = ttk.Frame(self.notebook)
+        self.notebook.add(panel, text="Games")
         self.rows = [GameRow(self, panel, g) for g in games]
         footer = ttk.Frame(panel)
         footer.pack(pady=10)
         ttk.Button(footer, text="Check again", command=lambda: [r.check() for r in self.rows]).pack(side="left", padx=4)
         ttk.Button(footer, text="Remove all installs", command=self.remove_all).pack(side="left", padx=4)
+
+        # Extra tabs from games.json: a name plus buttons that open websites.
+        self.link_buttons = []
+        for tab in tabs:
+            page = ttk.Frame(self.notebook, padding=16)
+            self.notebook.add(page, text=tab["name"])
+            for link in tab["links"]:
+                line = ttk.Frame(page)
+                line.pack(fill="x", pady=4)
+                button = ttk.Button(line, text=link["label"], width=22,
+                                    command=lambda url=link["url"]: webbrowser.open(url))
+                button.pack(side="left")
+                ttk.Label(line, text=link["url"].split("://", 1)[-1], font=("Segoe UI", 10)).pack(side="left", padx=10)
+                self.link_buttons.append(button)
 
     def remove_all(self):
         installed = [r for r in self.rows if core.installed_version(r.game)]
@@ -213,4 +230,4 @@ class App(tk.Tk):
 
 if __name__ == "__main__":
     config = core.load_config()
-    App(config["games"], config.get("launcher")).mainloop()
+    App(config["games"], config.get("launcher"), config.get("tabs", ())).mainloop()
