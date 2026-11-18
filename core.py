@@ -209,6 +209,16 @@ def install(game, version, url, progress=None):
             shutil.rmtree(old, ignore_errors=True)  # fails harmlessly if still running
 
 
+def uninstall(game):
+    """Delete every installed version of the game. Fails if it is running."""
+    game_dir = home() / game["id"]
+    if game_dir.exists():
+        try:
+            shutil.rmtree(game_dir)
+        except OSError as e:
+            raise LauncherError(f"Could not remove {game['name']}; close the game and try again") from e
+
+
 def launch(game):
     version = installed_version(game)
     if not version:

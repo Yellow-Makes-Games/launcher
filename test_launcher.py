@@ -150,6 +150,20 @@ class LauncherTest(unittest.TestCase):
             app.update()
             self.assertEqual(row.update_btn.cget("text"), "Update")
 
+            with mock.patch("launcher.messagebox.askyesno", return_value=False):
+                app.remove_all()
+            self.assertEqual(core.installed_version(self.game), "v0.1.0")  # answered No: untouched
+            with mock.patch("launcher.messagebox.askyesno", return_value=True) as asked:
+                app.remove_all()
+            self.assertIn("Demo", asked.call_args.kwargs["message"])
+            self.assertIsNone(core.installed_version(self.game))
+            self.assertFalse((core.home() / "demo").exists())
+            self.assertEqual(row.status.cget("text"), "Not installed · latest is v0.2.0")
+            self.assertEqual(str(row.play_btn.cget("state")), "disabled")
+            with mock.patch("launcher.messagebox.showinfo") as info,                     mock.patch("launcher.messagebox.askyesno") as asked:
+                app.remove_all()
+            self.assertTrue(info.called and not asked.called)  # nothing left to remove
+
     def test_network_errors_are_readable(self):
         dead = {**self.game, "source": {"type": "manifest", "url": "http://no-such-host.invalid/latest.json"}}
         with self.assertRaisesRegex(core.LauncherError, "Could not find the server"):

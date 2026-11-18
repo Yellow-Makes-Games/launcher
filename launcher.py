@@ -7,7 +7,7 @@ import queue
 import threading
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 import core
 
@@ -150,7 +150,27 @@ class App(tk.Tk):
         panel = ttk.Frame(canvas)
         canvas.create_window(36, HEIGHT - 36, anchor="sw", window=panel, width=720)
         self.rows = [GameRow(self, panel, g) for g in games]
-        ttk.Button(panel, text="Check again", command=lambda: [r.check() for r in self.rows]).pack(pady=10)
+        footer = ttk.Frame(panel)
+        footer.pack(pady=10)
+        ttk.Button(footer, text="Check again", command=lambda: [r.check() for r in self.rows]).pack(side="left", padx=4)
+        ttk.Button(footer, text="Remove all installs", command=self.remove_all).pack(side="left", padx=4)
+
+    def remove_all(self):
+        installed = [r for r in self.rows if core.installed_version(r.game)]
+        if not installed:
+            messagebox.showinfo("Remove all installs", "No games are installed.", parent=self)
+            return
+        names = ", ".join(r.game["name"] for r in installed)
+        if not messagebox.askyesno("Remove all installs", parent=self, icon="warning", default="no",
+                                   message=f"Delete the installed files for {names}?",
+                                   detail="You can install them again from the launcher."):
+            return
+        for row in installed:
+            try:
+                core.uninstall(row.game)
+                row.describe()
+            except core.LauncherError as e:
+                row.render(str(e))
 
     def launcher_checked(self, update, error):
         if error or not update:
