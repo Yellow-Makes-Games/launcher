@@ -106,14 +106,15 @@ def installed_version(game):
     return version if exe_path(game, version).exists() else None
 
 
-def latest(game):
-    """Ask the game's update source for (latest version, download URL).
+def versions(game):
+    """Ask the game's update source for [(version, download URL), ...], newest first.
 
     Source types (the "source" object in games.json):
       {"type": "manifest", "url": U}
-          U returns JSON {"version": "v1.2.3", "url": "<zip or exe>"}.
+          U returns JSON {"version": "v1.2.3", "url": "<zip or exe>"}; only
+          that one version is offered.
       {"type": "github_release", "repo": "owner/name", "asset": "File.zip"}
-          Newest GitHub Release of a public repo that has that file attached;
+          The GitHub Releases of a public repo that have that file attached;
           the version is the release's tag. "{version}" in the file name
           stands for that tag, e.g. "Game-{version}.zip".
     To support another kind of host, add a branch here.
@@ -125,21 +126,29 @@ def latest(game):
     if kind == "manifest":
         with _open(src["url"]) as r:
             data = json.load(r)
-        return data["version"], data["url"]
+        return [(data["version"], data["url"])]
     if kind == "github_release":
-        # Newest release that has the file: a release exists for a few minutes
-        # before its build is attached, and that must not look like an error.
-        with _open(f"https://api.github.com/repos/{src['repo']}/releases?per_page=20") as r:
+        # Releases without the file are skipped: a release exists for a few
+        # minutes before its build is attached, and that is not an error.
+        with _open(f"https://api.github.com/repos/{src['repo']}/releases?per_page=100") as r:
             releases = json.load(r)
+        found = []
         for rel in releases:
             if rel["draft"] or rel["prerelease"]:
                 continue
             wanted = src["asset"].replace("{version}", rel["tag_name"])
             for asset in rel["assets"]:
                 if asset["name"] == wanted:
-                    return rel["tag_name"], asset["browser_download_url"]
-        raise LauncherError(f"No release of {src['repo']} has a file named {src['asset']} yet")
+                    found.append((rel["tag_name"], asset["browser_download_url"]))
+        if not found:
+            raise LauncherError(f"No release of {src['repo']} has a file named {src['asset']} yet")
+        return found
     raise LauncherError(f"Unknown source type: {kind}")
+
+
+def latest(game):
+    """(latest version, download URL)."""
+    return versions(game)[0]
 
 
 def _key(version):

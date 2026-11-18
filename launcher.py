@@ -18,7 +18,7 @@ BACKGROUND = Path(__file__).with_name("background.png")  # 960x540, from Jumpy S
 class GameRow:
     def __init__(self, app, parent, game):
         self.app, self.game = app, game
-        self.latest = None  # (version, url) once the check succeeds
+        self.versions = []  # [(version, url), ...] newest first, once the check succeeds
 
         frame = ttk.Frame(parent, padding=16)
         frame.pack(fill="x")
@@ -30,41 +30,65 @@ class GameRow:
                                      cursor="hand2", font=("Segoe UI", 10, "underline"))
         self.folder_link.bind("<Button-1>", lambda e: self.open_folder())
         self.bar = ttk.Progressbar(frame, length=220)
-        self.update_btn = ttk.Button(frame, text="Install", command=self.start_install)
-        self.update_btn.grid(row=0, column=1, rowspan=2, padx=(12, 6))
+        self.picker = ttk.Combobox(frame, state="disabled", width=16)  # which version to install
+        self.picker.grid(row=0, column=1, rowspan=2, padx=(12, 0))
+        self.picker.bind("<<ComboboxSelected>>", lambda e: self.render(self.status.cget("text")))
+        self.update_btn = ttk.Button(frame, text="Install", width=18, command=self.start_install)
+        self.update_btn.grid(row=0, column=2, rowspan=2, padx=6)
         self.play_btn = ttk.Button(frame, text="Play", command=self.play)
-        self.play_btn.grid(row=0, column=2, rowspan=2)
+        self.play_btn.grid(row=0, column=3, rowspan=2)
         ttk.Separator(parent).pack(fill="x")
 
         self.check()
 
     def check(self):
         self.render("Checking for updates…", busy=True)
-        self.app.background(lambda: core.latest(self.game), self.checked)
+        self.app.background(lambda: core.versions(self.game), self.checked)
 
-    def checked(self, latest, error):
-        self.latest = latest
+    def checked(self, versions, error):
+        self.versions = versions or []
+        labels = [v if i else f"Latest ({v})" for i, (v, _) in enumerate(self.versions)]
+        self.picker.config(values=labels)
+        self.picker.set(labels[0] if labels else "")
+        self.describe(error)
+
+    def describe(self, error=None):
         have = core.installed_version(self.game)
+        newest = self.versions[0][0] if self.versions else None
         if isinstance(error, core.NoSource):
             note = "no update source set"
         elif error:
             note = f"could not check for updates ({error})"
         elif not have:
-            self.render(f"Not installed · latest is {latest[0]}")
+            self.render(f"Not installed · latest is {newest}")
             return
-        elif core.is_outdated(have, latest[0]):
-            self.render(f"Out of date · installed {have}, latest {latest[0]}")
+        elif core.is_outdated(have, newest):
+            self.render(f"Out of date · installed {have}, latest {newest}")
             return
         else:
             note = "up to date"
         self.render(f"Installed {have} · {note}" if have else f"Not installed · {note}")
 
+    def selected(self):
+        """The (version, url) chosen in the picker, or None before the check succeeds."""
+        index = self.picker.current()
+        return self.versions[index] if 0 <= index < len(self.versions) else None
+
     def render(self, text, busy=False):
         have = core.installed_version(self.game)
+        choice = self.selected()
         self.status.config(text=text)
-        can_update = not busy and self.latest and (not have or core.is_outdated(have, self.latest[0]))
-        self.update_btn.config(text="Update" if have else "Install",
-                               state="normal" if can_update else "disabled")
+        if not choice or choice == self.versions[0]:
+            action = "Update" if have else "Install"
+        elif not have:
+            action = f"Install {choice[0]}"
+        elif core.is_outdated(have, choice[0]):
+            action = f"Update to {choice[0]}"
+        else:
+            action = f"Switch to {choice[0]}"  # going back to an older version
+        can_act = not busy and choice and choice[0] != have
+        self.update_btn.config(text=action, state="normal" if can_act else "disabled")
+        self.picker.config(state="readonly" if self.versions and not busy else "disabled")
         self.play_btn.config(state="normal" if have and not busy else "disabled")
         if have:
             self.folder_link.grid(row=3, column=0, sticky="w", pady=(4, 0))
@@ -77,7 +101,7 @@ class GameRow:
             os.startfile(core.exe_path(self.game, version).parent)  # opens Explorer
 
     def start_install(self):
-        version, url = self.latest
+        version, url = self.selected()
         self.render(f"Downloading {version}…", busy=True)
         self.bar.grid(row=2, column=0, sticky="w", pady=(6, 0))
 
@@ -91,7 +115,7 @@ class GameRow:
         if error:
             self.render(f"Update failed: {error}")
         else:
-            self.checked(self.latest, None)
+            self.describe()
 
     def play(self):
         try:
@@ -124,7 +148,7 @@ class App(tk.Tk):
             core.remove_old_launcher()
             self.background(lambda: core.launcher_update(launcher_entry), self.launcher_checked)
         panel = ttk.Frame(canvas)
-        canvas.create_window(36, HEIGHT - 36, anchor="sw", window=panel, width=600)
+        canvas.create_window(36, HEIGHT - 36, anchor="sw", window=panel, width=720)
         self.rows = [GameRow(self, panel, g) for g in games]
         ttk.Button(panel, text="Check again", command=lambda: [r.check() for r in self.rows]).pack(pady=10)
 

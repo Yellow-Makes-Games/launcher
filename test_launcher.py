@@ -103,6 +103,53 @@ class LauncherTest(unittest.TestCase):
             with self.assertRaises(core.LauncherError):
                 core.latest(game)
 
+    def test_github_release_lists_every_version_with_the_file(self):
+        def rel(tag, files):
+            return {"tag_name": tag, "draft": False, "prerelease": False,
+                    "assets": [{"name": f, "browser_download_url": f"https://x/{f}"} for f in files]}
+        releases = [rel("v0.3.0", []), rel("v0.2.0", ["Demo-v0.2.0.zip"]), rel("v0.1.0", ["Demo-v0.1.0.zip"])]
+        game = {**self.game, "source": {"type": "github_release", "repo": "o/r", "asset": "Demo-{version}.zip"}}
+        with mock.patch("core._open", return_value=io.BytesIO(json.dumps(releases).encode())):
+            self.assertEqual(core.versions(game), [("v0.2.0", "https://x/Demo-v0.2.0.zip"),
+                                                   ("v0.1.0", "https://x/Demo-v0.1.0.zip")])
+
+    def test_window_can_go_back_to_an_older_version(self):
+        import launcher
+        self.publish("v0.1.0")
+        self.publish("v0.2.0")
+        offered = [("v0.2.0", f"{self.base}/Demo-v0.2.0.zip"), ("v0.1.0", f"{self.base}/Demo-v0.1.0.zip")]
+        with mock.patch("core.versions", return_value=offered):
+            app = launcher.App([self.game])
+            self.addCleanup(app.destroy)
+            row = app.rows[0]
+
+            def wait_for(text):
+                deadline = time.time() + 10
+                while text not in row.status.cget("text"):
+                    self.assertLess(time.time(), deadline, row.status.cget("text"))
+                    app.update()
+                    time.sleep(0.02)
+
+            wait_for("Not installed · latest is v0.2.0")
+            self.assertEqual(list(row.picker.cget("values")), ["Latest (v0.2.0)", "v0.1.0"])
+            row.update_btn.invoke()
+            wait_for("Installed v0.2.0 · up to date")
+            self.assertEqual(str(row.update_btn.cget("state")), "disabled")
+
+            row.picker.current(1)
+            row.picker.event_generate("<<ComboboxSelected>>")
+            app.update()
+            self.assertEqual(row.update_btn.cget("text"), "Switch to v0.1.0")
+            row.update_btn.invoke()
+            wait_for("Out of date · installed v0.1.0, latest v0.2.0")
+            self.assertEqual(core.exe_path(self.game, "v0.1.0").read_bytes(), b"build v0.1.0")
+            self.assertFalse(core.exe_path(self.game, "v0.2.0").exists())
+
+            row.picker.current(0)
+            row.picker.event_generate("<<ComboboxSelected>>")
+            app.update()
+            self.assertEqual(row.update_btn.cget("text"), "Update")
+
     def test_network_errors_are_readable(self):
         dead = {**self.game, "source": {"type": "manifest", "url": "http://no-such-host.invalid/latest.json"}}
         with self.assertRaisesRegex(core.LauncherError, "Could not find the server"):
