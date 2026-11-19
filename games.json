@@ -26,6 +26,16 @@
         "repo": "Yellow-Makes-Games/Jumpy-Shooty",
         "asset": "JumpyShooty-windows-{version}.zip"
       }
+    },
+    {
+      "id": "bastion",
+      "name": "Bastion",
+      "exe": "Bastion.exe",
+      "source": {
+        "type": "github_release",
+        "repo": "Yellow-Makes-Games/bastion",
+        "asset": "Bastion-windows-{version}.zip"
+      }
     }
   ]
 }

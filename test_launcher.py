@@ -185,6 +185,16 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual([c.args[0] for c in opened.call_args_list],
                          ["https://bastion.yellowmakes.games", "https://bastion-staging.yellowmakes.games"])
 
+    def test_tab_named_like_a_game_shares_its_page(self):
+        import launcher
+        self.publish("v0.1.0")
+        app = launcher.App([{**self.game, "name": "Bastion"}], tabs=core.load_config()["tabs"])
+        self.addCleanup(app.destroy)
+        self.assertEqual(list(app.selector.cget("values")), ["Bastion"])
+        self.assertEqual(len(app.rows), 1)
+        self.assertEqual(len(app.link_buttons), 2)
+        self.assertTrue(all(str(b).startswith(str(app.pages["Bastion"])) for b in app.link_buttons))
+
     def test_network_errors_are_readable(self):
         dead = {**self.game, "source": {"type": "manifest", "url": "http://no-such-host.invalid/latest.json"}}
         with self.assertRaisesRegex(core.LauncherError, "Could not find the server"):

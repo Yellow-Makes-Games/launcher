@@ -218,11 +218,15 @@ class App(tk.Tk):
             ttk.Button(footer, text="Check for updates", style="Quiet.TButton",
                        command=lambda: [r.check() for r in self.rows]).pack(side="right")
 
-        # Extra pages from games.json "tabs": a name plus buttons that open websites.
+        # Pages from games.json "tabs": a name plus buttons that open websites.
         self.link_buttons = []
         for tab in tabs:
-            page = ttk.Frame(panel, padding=(22, 18))
-            self.pages[tab["name"]] = page
+            if tab["name"] in self.pages:  # a game of the same name: its links go under the game
+                page = ttk.Frame(self.pages[tab["name"]], padding=(22, 0, 22, 12))
+                page.pack(fill="x")
+            else:
+                page = ttk.Frame(panel, padding=(22, 18))
+                self.pages[tab["name"]] = page
             for i, link in enumerate(tab["links"]):
                 line = ttk.Frame(page)
                 line.pack(fill="x", pady=5)
