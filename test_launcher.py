@@ -15,6 +15,11 @@ from unittest import mock
 
 import core
 
+# A page of website links, as games.json "tabs" can add.
+LINKS = [{"name": "Bastion", "links": [
+    {"label": "Open Bastion", "url": "https://bastion.yellowmakes.games"},
+    {"label": "Open Bastion staging", "url": "https://bastion-staging.yellowmakes.games"}]}]
+
 
 class LauncherTest(unittest.TestCase):
     def setUp(self):
@@ -185,7 +190,7 @@ class LauncherTest(unittest.TestCase):
     def test_tabs_switch_between_game_and_bastion(self):
         import launcher
         self.publish("v0.1.0")
-        app = launcher.App([self.game], tabs=core.load_config()["tabs"])
+        app = launcher.App([self.game], tabs=LINKS)
         self.addCleanup(app.destroy)
         self.assertEqual(list(app.tabs), ["Demo", "Bastion"])
         self.assertEqual(app.current, "Demo")
@@ -206,7 +211,7 @@ class LauncherTest(unittest.TestCase):
     def test_tab_named_like_a_game_shares_its_page(self):
         import launcher
         self.publish("v0.1.0")
-        app = launcher.App([{**self.game, "name": "Bastion"}], tabs=core.load_config()["tabs"])
+        app = launcher.App([{**self.game, "name": "Bastion"}], tabs=LINKS)
         self.addCleanup(app.destroy)
         self.assertEqual(list(app.tabs), ["Bastion"])
         self.assertEqual(len(app.rows), 1)
