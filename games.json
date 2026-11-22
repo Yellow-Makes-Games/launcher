@@ -7,15 +7,6 @@
       "asset": "YMGLauncher.exe"
     }
   },
-  "tabs": [
-    {
-      "name": "Bastion",
-      "links": [
-        {"label": "Open Bastion", "url": "https://bastion.yellowmakes.games"},
-        {"label": "Open Bastion staging", "url": "https://bastion-staging.yellowmakes.games"}
-      ]
-    }
-  ],
   "games": [
     {
       "id": "jumpy-shooty",

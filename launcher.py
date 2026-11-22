@@ -375,11 +375,7 @@ class App(tk.Tk):
                        image=self.keep("bottom", fade(self, WIDTH, 300, lambda t: 0.97 * t ** 1.6, False)))
         c.create_image(0, 0, anchor="nw", image=self.keep("top", fade(self, WIDTH, 120, lambda t: 0.8 * (1 - t) ** 2, False)))
 
-        # Top bar: logo, one tab per page, then the launcher's own version, update and account.
-        c.create_image(32, 18, anchor="nw", image=self.image("rounded", 24, 24, 6, ACCENT, 1.0))
-        c.create_text(44, 30, text="Y", fill=INK, font=(DISPLAY, 11))
-        c.create_text(66, 30, anchor="w", text="YELLOW MAKES GAMES", fill=TEXT, font=(FONT, 10, "bold"))
-
+        # Top bar: one tab per page, then the launcher's own version, update and account.
         self.pages = {}  # name -> {"row": GameRow or None, "links": [Button], "art": path or None}
         for game in games:
             self.pages[game["name"]] = {"row": None, "links": [], "art": game.get("background"), "game": game}
@@ -391,7 +387,7 @@ class App(tk.Tk):
         self.link_buttons = [b for page in self.pages.values() for b in page["links"]]
 
         self.tabs = {}
-        x = 270
+        x = 48  # lined up with the title
         for name in self.pages:
             item = c.create_text(x, 30, anchor="w", text=name.upper(), fill=MUTED, font=(FONT, 10, "bold"))
             c.tag_bind(item, "<Enter>", lambda e, n=name: self.hover_tab(n, True))
