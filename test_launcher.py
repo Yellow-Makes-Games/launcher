@@ -128,6 +128,13 @@ class LauncherTest(unittest.TestCase):
             self.assertEqual(core.versions(game), [("v0.2.0", "https://x/Demo-v0.2.0.zip"),
                                                    ("v0.1.0", "https://x/Demo-v0.1.0.zip")])
 
+    def wait_for(self, app, row, text):
+        deadline = time.time() + 10
+        while text not in row.status:
+            self.assertLess(time.time(), deadline, row.status)
+            app.update()
+            time.sleep(0.02)
+
     def test_window_can_go_back_to_an_older_version(self):
         import launcher
         self.publish("v0.1.0")
@@ -138,32 +145,27 @@ class LauncherTest(unittest.TestCase):
             self.addCleanup(app.destroy)
             row = app.rows[0]
 
-            def wait_for(text):
-                deadline = time.time() + 10
-                while text not in row.status.cget("text"):
-                    self.assertLess(time.time(), deadline, row.status.cget("text"))
-                    app.update()
-                    time.sleep(0.02)
+            self.wait_for(app, row, "Not installed · latest is v0.2.0")
+            self.assertEqual(app.primary.cget("text"), "INSTALL")
+            self.assertEqual(app.version_btn.cget("text"), "Latest · v0.2.0   ▾")
+            app.version_menu()
+            self.assertEqual(len(app.menu.winfo_children()[0].winfo_children()), 2)  # one line per version
+            app.close_menu()
+            app.primary.invoke()
+            self.wait_for(app, row, "Installed v0.2.0 · up to date")
+            self.assertEqual(app.primary.cget("text"), "▶   PLAY")
+            self.assertFalse(app.secondary.visible)  # nothing else to install
 
-            wait_for("Not installed · latest is v0.2.0")
-            self.assertEqual(list(row.picker.cget("values")), ["Latest (v0.2.0)", "v0.1.0"])
-            row.update_btn.invoke()
-            wait_for("Installed v0.2.0 · up to date")
-            self.assertEqual(str(row.update_btn.cget("state")), "disabled")
-
-            row.picker.current(1)
-            row.picker.event_generate("<<ComboboxSelected>>")
-            app.update()
-            self.assertEqual(row.update_btn.cget("text"), "Switch to v0.1.0")
-            row.update_btn.invoke()
-            wait_for("Out of date · installed v0.1.0, latest v0.2.0")
+            row.choose(1)
+            self.assertEqual(app.secondary.cget("text"), "Switch to v0.1.0")
+            app.secondary.invoke()
+            self.wait_for(app, row, "Out of date · installed v0.1.0, latest v0.2.0")
             self.assertEqual(core.exe_path(self.game, "v0.1.0").read_bytes(), b"build v0.1.0")
             self.assertFalse(core.exe_path(self.game, "v0.2.0").exists())
+            self.assertEqual(row.badge[0], "UPDATE AVAILABLE")
 
-            row.picker.current(0)
-            row.picker.event_generate("<<ComboboxSelected>>")
-            app.update()
-            self.assertEqual(row.update_btn.cget("text"), "Update")
+            row.choose(0)
+            self.assertEqual(app.secondary.cget("text"), "Update")
 
             with mock.patch("launcher.messagebox.askyesno", return_value=False):
                 app.remove_all()
@@ -173,27 +175,28 @@ class LauncherTest(unittest.TestCase):
             self.assertIn("Demo", asked.call_args.kwargs["message"])
             self.assertIsNone(core.installed_version(self.game))
             self.assertFalse((core.home() / "demo").exists())
-            self.assertEqual(row.status.cget("text"), "Not installed · latest is v0.2.0")
-            self.assertEqual(str(row.play_btn.cget("state")), "disabled")
-            with mock.patch("launcher.messagebox.showinfo") as info,                     mock.patch("launcher.messagebox.askyesno") as asked:
+            self.assertEqual(row.status, "Not installed · latest is v0.2.0")
+            self.assertEqual(app.primary.cget("text"), "INSTALL")
+            with mock.patch("launcher.messagebox.showinfo") as info, \
+                    mock.patch("launcher.messagebox.askyesno") as asked:
                 app.remove_all()
             self.assertTrue(info.called and not asked.called)  # nothing left to remove
 
-    def test_dropdown_switches_between_game_and_bastion(self):
+    def test_tabs_switch_between_game_and_bastion(self):
         import launcher
         self.publish("v0.1.0")
         app = launcher.App([self.game], tabs=core.load_config()["tabs"])
         self.addCleanup(app.destroy)
-        self.assertEqual(list(app.selector.cget("values")), ["Demo", "Bastion"])
-        self.assertEqual(app.selector.get(), "Demo")
-        self.assertTrue(app.pages["Demo"].winfo_manager())
-        self.assertFalse(app.pages["Bastion"].winfo_manager())
+        self.assertEqual(list(app.tabs), ["Demo", "Bastion"])
+        self.assertEqual(app.current, "Demo")
+        self.assertEqual(app.canvas.itemcget(app.heading, "text"), "Demo")
+        self.assertFalse(any(b.visible for b in app.link_buttons))
 
-        app.selector.current(1)
-        app.selector.event_generate("<<ComboboxSelected>>")
-        app.update()
-        self.assertTrue(app.pages["Bastion"].winfo_manager())
-        self.assertFalse(app.pages["Demo"].winfo_manager())
+        app.show("Bastion")
+        self.assertEqual(app.canvas.itemcget(app.heading, "text"), "Bastion")
+        self.assertEqual(app.canvas.itemcget(app.watermark, "text"), "BASTION")  # no artwork: generated
+        self.assertTrue(all(b.visible for b in app.link_buttons))
+        self.assertFalse(app.primary.visible)
         with mock.patch("launcher.webbrowser.open") as opened:
             for button in app.link_buttons:
                 button.invoke()
@@ -205,10 +208,18 @@ class LauncherTest(unittest.TestCase):
         self.publish("v0.1.0")
         app = launcher.App([{**self.game, "name": "Bastion"}], tabs=core.load_config()["tabs"])
         self.addCleanup(app.destroy)
-        self.assertEqual(list(app.selector.cget("values")), ["Bastion"])
+        self.assertEqual(list(app.tabs), ["Bastion"])
         self.assertEqual(len(app.rows), 1)
         self.assertEqual(len(app.link_buttons), 2)
-        self.assertTrue(all(str(b).startswith(str(app.pages["Bastion"])) for b in app.link_buttons))
+        self.assertTrue(all(b.visible for b in app.link_buttons))  # under the game's own buttons
+        self.assertTrue(app.primary.visible)
+
+    def test_game_artwork_is_used_when_set(self):
+        import launcher
+        app = launcher.App([{**self.game, "source": None, "background": "background.png"}])
+        self.addCleanup(app.destroy)
+        self.assertEqual(app.canvas.itemcget(app.watermark, "text"), "")
+        self.assertEqual(app.art_for("Demo")[0].width(), launcher.WIDTH)
 
     def test_sign_in_is_kept_encrypted_and_sign_out_forgets_it(self):
         self.assertIsNone(core.github_token())
@@ -312,7 +323,10 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(opened.call_args[0][0], "https://github.com/login/device")
         self.assertEqual(app.clipboard_get(), "AB12-CD34")
         self.assertIsNone(app.sign_in_box)
-        app.account_btn.invoke()
+        app.account_btn.invoke()  # signed in: a menu with Sign out
+        self.assertIsNotNone(app.menu)
+        app.close_menu()
+        app.sign_out()
         self.assertEqual(app.account_btn.cget("text"), "Sign in with GitHub")
         self.assertIsNone(core.github_token())
 
@@ -331,35 +345,34 @@ class LauncherTest(unittest.TestCase):
         self.addCleanup(app.destroy)
         row, unset = app.rows
 
-        def wait_for(text):
-            deadline = time.time() + 10
-            while text not in row.status.cget("text"):
-                self.assertLess(time.time(), deadline, row.status.cget("text"))
-                app.update()
-                time.sleep(0.02)
+        self.wait_for(app, row, "Not installed · latest is v0.2.0")
+        self.assertEqual(app.primary.cget("text"), "INSTALL")
+        self.assertEqual(app.primary.cget("state"), "normal")
+        self.wait_for(app, unset, "Not installed · no update source set")
+        app.show("Unset")
+        self.assertEqual(app.primary.cget("state"), "disabled")
+        self.assertFalse(app.version_btn.visible)
+        app.show("Demo")
 
-        wait_for("Not installed · latest is v0.2.0")
-        self.assertEqual(str(row.play_btn.cget("state")), "disabled")
-        self.assertEqual(unset.status.cget("text"), "Not installed · no update source set")
-        self.assertEqual(str(unset.update_btn.cget("state")), "disabled")
-
-        self.assertFalse(row.folder_link.winfo_manager())  # no link until installed
-        row.update_btn.invoke()
-        wait_for("Installed v0.2.0 · up to date")
-        self.assertEqual(row.folder_link.winfo_manager(), "grid")
+        app.primary.invoke()
+        self.assertTrue(row.busy)
+        self.assertEqual(app.canvas.itemcget(app.fill, "state"), "normal")  # download progress
+        self.wait_for(app, row, "Installed v0.2.0 · up to date")
+        self.assertEqual(app.canvas.itemcget(app.fill, "state"), "hidden")
+        self.assertEqual(row.badge[0], "READY TO PLAY")
         with mock.patch("launcher.os.startfile") as startfile:
             row.open_folder()
         self.assertEqual(startfile.call_args[0][0], core.exe_path(self.game, "v0.2.0").parent)
-        self.assertEqual(str(row.play_btn.cget("state")), "normal")
-        self.assertEqual(str(row.update_btn.cget("state")), "disabled")
+        with mock.patch("core.subprocess.Popen") as popen:
+            app.primary.invoke()  # Play
+        self.assertEqual(popen.call_args[0][0], [str(core.exe_path(self.game, "v0.2.0"))])
 
         self.publish("v0.3.0")
         row.check()
-        wait_for("Out of date · installed v0.2.0, latest v0.3.0")
-        self.assertEqual(row.update_btn.cget("text"), "Update")
-        row.update_btn.invoke()
-        wait_for("Installed v0.3.0 · up to date")
-
+        self.wait_for(app, row, "Out of date · installed v0.2.0, latest v0.3.0")
+        self.assertEqual(app.secondary.cget("text"), "Update")
+        app.secondary.invoke()
+        self.wait_for(app, row, "Installed v0.3.0 · up to date")
 
 if __name__ == "__main__":
     unittest.main()
