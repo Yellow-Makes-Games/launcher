@@ -1,5 +1,6 @@
 """End-to-end check against a local web server:  python -m unittest -v"""
 import functools
+import gc
 import http.server
 import io
 import json
@@ -27,11 +28,25 @@ class LauncherTest(unittest.TestCase):
         handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(self.site))
         handler.log_message = lambda *a: None
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.server_thread.start()
         self.addCleanup(self.server.shutdown)
+        self.addCleanup(self.settle)  # runs after each test's app.destroy
         self.base = f"http://127.0.0.1:{self.server.server_port}"
         self.game = {"id": "demo", "name": "Demo", "exe": "Demo.exe",
                      "source": {"type": "manifest", "url": f"{self.base}/latest.json"}}
+
+    def settle(self):
+        """Let the window's background work finish, then free the window here.
+
+        Otherwise a worker thread can drop the last reference to a closed
+        window, and Tk aborts the whole process ("Tcl_AsyncDelete: async
+        handler deleted by the wrong thread").
+        """
+        for t in threading.enumerate():
+            if t not in (threading.main_thread(), threading.current_thread(), self.server_thread):
+                t.join(10)
+        gc.collect()
 
     def publish(self, version, as_zip=True):
         body = f"build {version}".encode()
