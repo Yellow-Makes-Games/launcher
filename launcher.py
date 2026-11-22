@@ -101,6 +101,8 @@ class GameRow:
         newest = self.versions[0][0] if self.versions else None
         if isinstance(error, core.NoSource):
             note = "no update source set"
+        elif isinstance(error, core.NeedsSignIn):
+            note = "sign in with GitHub (top right) to get this game"
         elif error:
             note = f"could not check for updates ({error})"
         elif not have:
@@ -169,6 +171,35 @@ class GameRow:
             core.launch(self.game)
         except Exception as e:
             self.render(f"Could not start: {e}")
+
+
+class SignInBox(tk.Toplevel):
+    """Shows the code to enter on GitHub while the launcher waits for it."""
+
+    def __init__(self, app, device, cancelled):
+        super().__init__(app, bg=PANEL, padx=28, pady=22)
+        self.title("Sign in with GitHub")
+        self.resizable(False, False)
+        self.transient(app)
+        self.cancelled = cancelled
+        self.protocol("WM_DELETE_WINDOW", self.cancel)
+        code, url = device["user_code"], device["verification_uri"]
+        ttk.Label(self, text="Enter this code on GitHub:").pack(anchor="w")
+        ttk.Label(self, text=code, foreground=ACCENT, font=(FONT, 26, "bold")).pack(anchor="w", pady=(4, 2))
+        ttk.Label(self, text=f"It is copied, so you can paste it at {url.split('://', 1)[-1]}",
+                  foreground=MUTED).pack(anchor="w")
+        buttons = ttk.Frame(self)
+        buttons.pack(fill="x", pady=(18, 0))
+        ttk.Button(buttons, text="Open GitHub", style="Accent.TButton",
+                   command=lambda: webbrowser.open(url)).pack(side="left")
+        ttk.Button(buttons, text="Cancel", command=self.cancel).pack(side="left", padx=8)
+        self.clipboard_clear()
+        self.clipboard_append(code)
+        webbrowser.open(url)
+
+    def cancel(self):
+        self.cancelled.set()  # the background wait stops within a few seconds
+        self.destroy()
 
 
 class App(tk.Tk):
@@ -242,6 +273,48 @@ class App(tk.Tk):
         canvas.create_window(38, 108, anchor="nw", window=self.selector)
         if self.pages:
             self.show(next(iter(self.pages)))
+
+        # GitHub sign-in, for games whose repo is private.
+        self.account_btn = ttk.Button(canvas, style="Quiet.TButton", command=self.account_clicked)
+        canvas.create_window(WIDTH - 36, 108, anchor="ne", window=self.account_btn)
+        self.sign_in_box = None
+        self.show_account()
+
+    def show_account(self):
+        login = core.github_login()
+        self.account_btn.config(state="normal",
+                                text=f"GitHub: {login}  ·  Sign out" if login else "Sign in with GitHub")
+
+    def account_clicked(self):
+        if core.github_login():
+            core.sign_out()
+            self.show_account()
+            for row in self.rows:
+                row.check()
+            return
+        self.account_btn.config(state="disabled", text="Contacting GitHub…")
+        self.background(core.start_sign_in, self.got_sign_in_code)
+
+    def got_sign_in_code(self, device, error):
+        if error:
+            self.show_account()
+            messagebox.showerror("Sign in with GitHub", str(error), parent=self)
+            return
+        cancelled = threading.Event()
+        self.sign_in_box = SignInBox(self, device, cancelled)
+        self.background(lambda: core.finish_sign_in(device, cancelled),
+                        lambda login, err: self.signed_in(login, err, cancelled))
+
+    def signed_in(self, _login, error, cancelled):
+        if self.sign_in_box and self.sign_in_box.winfo_exists():
+            self.sign_in_box.destroy()
+        self.sign_in_box = None
+        self.show_account()
+        if error and not cancelled.is_set():
+            messagebox.showerror("Sign in with GitHub", str(error), parent=self)
+        elif not error:
+            for row in self.rows:
+                row.check()
 
     def show(self, name):
         """Put the named page in the box and select it in the dropdown."""

@@ -23,7 +23,16 @@ Add an entry to `games.json`:
 }
 ```
 
-`{version}` stands for the release tag. The file can be a zip containing the exe, or the exe itself. The repo must be public. For other hosts use `{"type": "manifest", "url": "..."}`, where the URL returns `{"version": "v1.2.3", "url": "<zip or exe>"}`.
+`{version}` stands for the release tag. The file can be a zip containing the exe, or the exe itself. For other hosts use `{"type": "manifest", "url": "..."}`, where the URL returns `{"version": "v1.2.3", "url": "<zip or exe>"}`.
+
+### Games in private repos
+
+Players click **Sign in with GitHub** (top right) and enter the code shown at github.com/login/device. The sign-in belongs to the org's **YMG Launcher** GitHub App (read-only access to repository contents), so the launcher can only read repos that are:
+
+1. ones the app is installed on (org settings → GitHub Apps → YMG Launcher → Configure → add the repo), **and**
+2. ones the player's GitHub account can see.
+
+The sign-in is kept in `%LOCALAPPDATA%\YellowMakesGames\github-sign-in.bin`, encrypted so only that Windows user can read it.
 
 ## Developing
 
