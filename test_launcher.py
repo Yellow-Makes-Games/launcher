@@ -195,6 +195,112 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(len(app.link_buttons), 2)
         self.assertTrue(all(str(b).startswith(str(app.pages["Bastion"])) for b in app.link_buttons))
 
+    def test_sign_in_is_kept_encrypted_and_sign_out_forgets_it(self):
+        self.assertIsNone(core.github_token())
+        core._write_token({"token": "gh-secret", "login": "tim"})
+        self.assertNotIn(b"gh-secret", core._token_file().read_bytes())
+        self.assertEqual((core.github_token(), core.github_login()), ("gh-secret", "tim"))
+        core.sign_out()
+        self.assertIsNone(core.github_token())
+        self.assertIsNone(core.github_login())
+
+    def test_sign_in_waits_for_the_code_then_keeps_the_token(self):
+        replies = iter([{"error": "authorization_pending"}, {"error": "slow_down", "interval": 0},
+                        {"access_token": "t1", "refresh_token": "r1", "expires_in": 28800}])
+        posts = []
+
+        def post(url, **fields):
+            posts.append((url, fields))
+            return next(replies)
+
+        cancelled = mock.Mock(wait=mock.Mock(return_value=False))
+        with mock.patch("core._github_post", post), \
+                mock.patch("core._open", return_value=io.BytesIO(b'{"login": "tim"}')) as opened:
+            login = core.finish_sign_in({"device_code": "d", "interval": 0, "expires_in": 60}, cancelled)
+        self.assertEqual(login, "tim")
+        self.assertEqual(len(posts), 3)
+        self.assertEqual(posts[0][1]["device_code"], "d")
+        self.assertEqual(opened.call_args[0][0], "https://api.github.com/user")
+        self.assertEqual((core.github_token(), core.github_login()), ("t1", "tim"))
+
+        cancelled.wait.return_value = True
+        with self.assertRaisesRegex(core.LauncherError, "cancelled"):
+            core.finish_sign_in({"device_code": "d"}, cancelled)
+        with mock.patch("core._github_post", return_value={"error": "access_denied"}):
+            cancelled.wait.return_value = False
+            with self.assertRaisesRegex(core.LauncherError, "declined"):
+                core.finish_sign_in({"device_code": "d"}, cancelled)
+
+    def test_expired_token_is_refreshed_or_dropped(self):
+        core._write_token({"token": "old", "refresh_token": "r1", "expires_at": time.time() - 1, "login": "tim"})
+        with mock.patch("core._github_post", return_value={"access_token": "new", "refresh_token": "r2",
+                                                           "expires_in": 28800}) as post:
+            self.assertEqual(core.github_token(), "new")
+        self.assertEqual(post.call_args.kwargs["refresh_token"], "r1")
+        self.assertEqual((core.github_token(), core.github_login()), ("new", "tim"))  # no second refresh
+
+        core._write_token({"token": "old", "refresh_token": "r2", "expires_at": time.time() - 1, "login": "tim"})
+        with mock.patch("core._github_post", side_effect=core.LauncherError("offline")):
+            self.assertIsNone(core.github_token())
+        self.assertEqual(core.github_login(), "tim")  # kept for when the network is back
+        with mock.patch("core._github_post", return_value={"error": "bad_refresh_token"}):
+            self.assertIsNone(core.github_token())
+        self.assertIsNone(core.github_login())
+
+    def test_token_goes_only_to_the_github_api_and_not_past_redirects(self):
+        core._write_token({"token": "tok", "login": "tim"})
+        with mock.patch("core.urllib.request.urlopen") as urlopen:
+            core._open("https://api.github.com/repos/o/r/releases/assets/7")
+            core._open(f"{self.base}/latest.json")
+        api, other = (c.args[0] for c in urlopen.call_args_list)
+        self.assertEqual(api.unredirected_hdrs.get("Authorization"), "Bearer tok")
+        self.assertNotIn("Authorization", api.headers)
+        self.assertEqual(api.get_header("Accept"), "application/octet-stream")
+        self.assertFalse(other.has_header("Authorization"))
+
+    def test_private_repo_asks_to_sign_in(self):
+        import urllib.error
+        game = {**self.game, "source": {"type": "github_release", "repo": "o/secret", "asset": "Demo.zip"}}
+        not_found = urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+        with mock.patch("core.urllib.request.urlopen", side_effect=not_found):
+            with self.assertRaises(core.NeedsSignIn):
+                core.versions(game)
+            core._write_token({"token": "tok", "login": "tim"})
+            with self.assertRaisesRegex(core.LauncherError, "ask for access"):
+                core.versions(game)
+        # Signed in, downloads use the API link, which works for private repos.
+        releases = [{"tag_name": "v1", "draft": False, "prerelease": False,
+                     "assets": [{"name": "Demo.zip", "url": "https://api.github.com/repos/o/secret/releases/assets/1",
+                                 "browser_download_url": "https://github.com/o/secret/releases/download/v1/Demo.zip"}]}]
+        with mock.patch("core.urllib.request.urlopen", return_value=io.BytesIO(json.dumps(releases).encode())):
+            self.assertEqual(core.latest(game), ("v1", "https://api.github.com/repos/o/secret/releases/assets/1"))
+
+    def test_window_sign_in_and_out(self):
+        import launcher
+        app = launcher.App([{**self.game, "source": None}])
+        self.addCleanup(app.destroy)
+        self.assertEqual(app.account_btn.cget("text"), "Sign in with GitHub")
+        device = {"user_code": "AB12-CD34", "verification_uri": "https://github.com/login/device", "device_code": "d"}
+
+        def finish(_device, _cancelled):
+            core._write_token({"token": "tok", "login": "tim"})
+            return "tim"
+
+        with mock.patch("core.start_sign_in", return_value=device), \
+                mock.patch("core.finish_sign_in", finish), mock.patch("launcher.webbrowser.open") as opened:
+            app.account_btn.invoke()
+            deadline = time.time() + 10
+            while "tim" not in app.account_btn.cget("text"):
+                self.assertLess(time.time(), deadline)
+                app.update()
+                time.sleep(0.02)
+        self.assertEqual(opened.call_args[0][0], "https://github.com/login/device")
+        self.assertEqual(app.clipboard_get(), "AB12-CD34")
+        self.assertIsNone(app.sign_in_box)
+        app.account_btn.invoke()
+        self.assertEqual(app.account_btn.cget("text"), "Sign in with GitHub")
+        self.assertIsNone(core.github_token())
+
     def test_network_errors_are_readable(self):
         dead = {**self.game, "source": {"type": "manifest", "url": "http://no-such-host.invalid/latest.json"}}
         with self.assertRaisesRegex(core.LauncherError, "Could not find the server"):
