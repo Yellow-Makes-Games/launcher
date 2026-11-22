@@ -21,6 +21,7 @@
       "id": "jumpy-shooty",
       "name": "Jumpy Shooty",
       "exe": "JumpyShooty.exe",
+      "background": "background.png",
       "source": {
         "type": "github_release",
         "repo": "Yellow-Makes-Games/Jumpy-Shooty",
