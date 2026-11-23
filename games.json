@@ -36,7 +36,8 @@
       "links": [
         {
           "label": "Play Civalia",
-          "url": "https://civalia.yellowmakes.games"
+          "url": "https://civalia.yellowmakes.games",
+          "window": true
         }
       ]
     }

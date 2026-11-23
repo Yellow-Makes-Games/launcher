@@ -25,6 +25,16 @@ Add an entry to `games.json`:
 
 `{version}` stands for the release tag. The file can be a zip containing the exe, or the exe itself. For other hosts use `{"type": "manifest", "url": "..."}`, where the URL returns `{"version": "v1.2.3", "url": "<zip or exe>"}`.
 
+### Browser games
+
+A game that is a website goes under `"tabs"`, as a page of links:
+
+```json
+{"name": "Civalia", "links": [{"label": "Play Civalia", "url": "https://civalia.yellowmakes.games", "window": true}]}
+```
+
+With `"window": true` the site opens in a window of its own (Edge's app mode: no tabs or address bar, its own taskbar entry); without it, or on a PC without Edge, it opens in the default browser. A tab with the same name as a game adds its links under that game's buttons. Any page can show its own picture with `"background": "file.png"` (960×540, shipped next to the exe).
+
 ### Games in private repos
 
 Players click **Sign in with GitHub** (top right) and enter the code shown at github.com/login/device. The sign-in belongs to the org's **YMG Launcher** GitHub App (read-only access to repository contents), so the launcher can only read repos that are:

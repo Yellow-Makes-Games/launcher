@@ -385,8 +385,12 @@ class App(tk.Tk):
             big = "game" not in page
             sites = "  ·  ".join(link["url"].split("://", 1)[-1].rstrip("/") for link in tab["links"])
             page["note"] = f"Plays in your browser  ·  {sites}"
+            if all(link.get("window") for link in tab["links"]):
+                page["note"] = f"Opens in its own window  ·  {sites}"
             for link in tab["links"]:
-                page["links"].append(Button(self, f"{link['label']}  ↗", lambda url=link["url"]: webbrowser.open(url),
+                # "window": true opens the site as its own app window; otherwise a browser tab.
+                text = f"▶   {link['label']}" if link.get("window") else f"{link['label']}  ↗"
+                page["links"].append(Button(self, text, lambda link=link: self.open_link(link),
                                             height=54 if big else 36, font=(FONT, 13 if big else 9, "bold")))
         self.link_buttons = [b for page in self.pages.values() for b in page["links"]]
 
@@ -486,6 +490,15 @@ class App(tk.Tk):
         for button in self.link_buttons:
             button.hide()
         self.draw()
+
+    def open_link(self, link):
+        if link.get("window"):
+            try:
+                if core.open_game_window(link["url"]):
+                    return
+            except (core.LauncherError, OSError):
+                pass  # no usable Edge: a normal browser tab instead
+        webbrowser.open(link["url"])
 
     def hover_tab(self, name, on):
         self.canvas.config(cursor="hand2" if on else "")

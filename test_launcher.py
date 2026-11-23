@@ -208,6 +208,23 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual([c.args[0] for c in opened.call_args_list],
                          ["https://bastion.yellowmakes.games", "https://bastion-staging.yellowmakes.games"])
 
+    def test_browser_game_opens_in_its_own_window(self):
+        import launcher
+        tabs = [{"name": "Civ", "links": [{"label": "Play Civ", "url": "https://civ.example", "window": True}]}]
+        app = launcher.App([], tabs=tabs)
+        self.addCleanup(app.destroy)
+        button, = app.link_buttons
+        self.assertEqual(button.cget("text"), "▶   Play Civ")
+        self.assertIn("own window", app.canvas.itemcget(app.status, "text"))
+        with mock.patch("core._edge", return_value=r"C:\Edge\msedge.exe"), \
+                mock.patch("core.subprocess.Popen") as popen, mock.patch("launcher.webbrowser.open") as browser:
+            button.invoke()
+        self.assertEqual(popen.call_args[0][0][:2], [r"C:\Edge\msedge.exe", "--app=https://civ.example"])
+        self.assertFalse(browser.called)
+        with mock.patch("core._edge", return_value=None), mock.patch("launcher.webbrowser.open") as browser:
+            button.invoke()  # no Edge: an ordinary browser tab
+        self.assertEqual(browser.call_args[0][0], "https://civ.example")
+
     def test_tab_named_like_a_game_shares_its_page(self):
         import launcher
         self.publish("v0.1.0")
