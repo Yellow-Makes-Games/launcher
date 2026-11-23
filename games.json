@@ -29,5 +29,16 @@
         "asset": "Bastion-windows-{version}.zip"
       }
     }
+  ],
+  "tabs": [
+    {
+      "name": "Civalia",
+      "links": [
+        {
+          "label": "Play Civalia",
+          "url": "https://civalia.yellowmakes.games"
+        }
+      ]
+    }
   ]
 }

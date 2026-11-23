@@ -381,9 +381,13 @@ class App(tk.Tk):
             self.pages[game["name"]] = {"row": None, "links": [], "art": game.get("background"), "game": game}
         for tab in tabs:  # a tab named like a game adds its links to the game's page
             page = self.pages.setdefault(tab["name"], {"row": None, "links": [], "art": tab.get("background")})
+            # Under a game's own buttons links are small; on a page of their own they are the big buttons.
+            big = "game" not in page
+            sites = "  ·  ".join(link["url"].split("://", 1)[-1].rstrip("/") for link in tab["links"])
+            page["note"] = f"Plays in your browser  ·  {sites}"
             for link in tab["links"]:
                 page["links"].append(Button(self, f"{link['label']}  ↗", lambda url=link["url"]: webbrowser.open(url),
-                                            height=36, font=(FONT, 9, "bold")))
+                                            height=54 if big else 36, font=(FONT, 13 if big else 9, "bold")))
         self.link_buttons = [b for page in self.pages.values() for b in page["links"]]
 
         self.tabs = {}
@@ -496,11 +500,11 @@ class App(tk.Tk):
     def draw(self):
         c, page = self.canvas, self.pages[self.current]
         row = page["row"]
-        text, colour = row.badge if row else ("WEBSITE", MUTED)
+        text, colour = row.badge if row else ("BROWSER GAME", GOOD)
         c.itemconfigure(self.badge, text=text, fill=colour)
         c.itemconfigure(self.badge_dot, fill=colour)
         c.coords(self.badge_dot, 49, 218, 57, 226)
-        c.itemconfigure(self.status, text=row.status if row else "")
+        c.itemconfigure(self.status, text=row.status if row else page["note"])
         for button in (self.primary, self.secondary, self.version_btn, self.more_btn):
             button.hide()
 
