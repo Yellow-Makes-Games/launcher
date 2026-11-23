@@ -257,6 +257,43 @@ def launch(game):
     subprocess.Popen([str(exe)], cwd=str(exe.parent))
 
 
+# --- Browser games in their own window ---
+
+def _edge():
+    """Path to Microsoft Edge (part of Windows 10 and 11), or None."""
+    try:
+        import winreg
+        for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                path = winreg.QueryValue(root, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe")
+            except OSError:
+                continue
+            if path and Path(path).exists():
+                return path
+    except ImportError:
+        pass
+    for base in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
+        path = Path(os.environ.get(base, "")) / "Microsoft" / "Edge" / "Application" / "msedge.exe"
+        if os.environ.get(base) and path.exists():
+            return str(path)
+    return None
+
+
+def open_game_window(url):
+    """Open a browser game in a window of its own: no tabs or address bar, its own taskbar entry.
+
+    Uses Edge's app mode; returns False if Edge is missing, so the caller can
+    fall back to the default browser.
+    """
+    if not url.lower().startswith("https://"):
+        raise LauncherError(f"Refusing non-https URL: {url}")
+    edge = _edge()
+    if not edge:
+        return False
+    subprocess.Popen([edge, f"--app={url}", "--window-size=1280,800"])
+    return True
+
+
 # --- Signing in with GitHub, to see games in private repos ---
 #
 # GitHub's device flow: the launcher gets a short code, the user enters it at
