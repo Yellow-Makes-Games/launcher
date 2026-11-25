@@ -148,6 +148,9 @@ def versions(game):
           With "manifest": "manifest-windows.json" as well, a release that has
           that file is installed from it instead (see install_manifest): only
           the files that changed are downloaded.
+          With "prerelease": true, only the repo's prereleases are offered (a
+          playtest channel, e.g. Jumpy Shooty's pt-v tags) and its normal
+          releases are skipped; without it, the other way round.
     To support another kind of host, add a branch here.
     """
     src = game.get("source")
@@ -167,8 +170,9 @@ def versions(game):
         # link) also works for private repos.
         link = "url" if github_token() else "browser_download_url"
         found = []
+        prerelease = bool(src.get("prerelease"))
         for rel in releases:
-            if rel["draft"] or rel["prerelease"]:
+            if rel["draft"] or bool(rel["prerelease"]) != prerelease:
                 continue
             files = {a["name"]: a[link] for a in rel["assets"]}
             _release_files[(src["repo"], rel["tag_name"])] = files
@@ -206,7 +210,7 @@ def latest(game):
 
 
 def _key(version):
-    m = re.fullmatch(r"v?(\d+(?:\.\d+)*)", version)
+    m = re.fullmatch(r"(?:[A-Za-z]+-)?v?(\d+(?:\.\d+)*)", version)  # (a channel prefix: "pt-v0.1.3")
     return tuple(int(n) for n in m.group(1).split(".")) if m else None
 
 

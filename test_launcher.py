@@ -243,6 +243,25 @@ class LauncherTest(unittest.TestCase):
             self.assertEqual(core.versions(game), [("v0.2.0", "https://x/Demo-v0.2.0.zip"),
                                                    ("v0.1.0", "https://x/Demo-v0.1.0.zip")])
 
+    def test_prerelease_source_is_a_channel_of_its_own(self):
+        def rel(tag, prerelease):
+            return {"tag_name": tag, "draft": False, "prerelease": prerelease,
+                    "assets": [{"name": f"Demo-{tag}.zip", "browser_download_url": f"https://x/{tag}.zip"}]}
+        releases = [rel("v0.2.0", False), rel("pt-v0.1.1", True), rel("v0.1.0", False), rel("pt-v0.1.0", True)]
+        public = {**self.game, "source": {"type": "github_release", "repo": "o/r", "asset": "Demo-{version}.zip"}}
+        playtest = {**self.game, "source": {**public["source"], "prerelease": True}}
+        with mock.patch("core._open", side_effect=lambda *a, **k: io.BytesIO(json.dumps(releases).encode())):
+            self.assertEqual([v for v, _ in core.versions(public)], ["v0.2.0", "v0.1.0"])
+            self.assertEqual([v for v, _ in core.versions(playtest)], ["pt-v0.1.1", "pt-v0.1.0"])
+        self.assertTrue(core.is_outdated("pt-v0.1.9", "pt-v0.1.10"))
+        self.assertFalse(core.is_outdated("pt-v0.1.10", "pt-v0.1.9"))
+
+    def test_games_json_has_the_playtest_beside_the_game(self):
+        games = {g["id"]: g for g in core.load_games()}
+        self.assertTrue(games["jumpy-shooty-playtest"]["source"]["prerelease"])
+        self.assertFalse(games["jumpy-shooty"]["source"].get("prerelease", False))
+        self.assertEqual(len({g["name"] for g in games.values()}), len(games))  # one tab each
+
     def wait_for(self, app, row, text):
         deadline = time.time() + 10
         while text not in row.status:
