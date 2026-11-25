@@ -21,6 +21,19 @@
       }
     },
     {
+      "id": "jumpy-shooty-playtest",
+      "name": "Jumpy Shooty Playtest",
+      "exe": "JumpyShooty.exe",
+      "background": "background.png",
+      "source": {
+        "type": "github_release",
+        "repo": "Yellow-Makes-Games/Jumpy-Shooty",
+        "asset": "JumpyShooty-windows-{version}.zip",
+        "manifest": "manifest-windows.json",
+        "prerelease": true
+      }
+    },
+    {
       "id": "bastion",
       "name": "Bastion",
       "exe": "Bastion.exe",
