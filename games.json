@@ -16,7 +16,8 @@
       "source": {
         "type": "github_release",
         "repo": "Yellow-Makes-Games/Jumpy-Shooty",
-        "asset": "JumpyShooty-windows-{version}.zip"
+        "asset": "JumpyShooty-windows-{version}.zip",
+        "manifest": "manifest-windows.json"
       }
     },
     {

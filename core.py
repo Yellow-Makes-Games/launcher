@@ -5,6 +5,7 @@ On disk each game lives at  <home>/<game id>/<version>/<exe>  with
 version is always known without inspecting the exe.
 """
 import ctypes
+import hashlib
 import json
 import os
 import re
@@ -144,6 +145,9 @@ def versions(game):
           version is the release's tag. "{version}" in the file name stands
           for that tag, e.g. "Game-{version}.zip". A private repo needs the
           user signed in with GitHub (see start_sign_in).
+          With "manifest": "manifest-windows.json" as well, a release that has
+          that file is installed from it instead (see install_manifest): only
+          the files that changed are downloaded.
     To support another kind of host, add a branch here.
     """
     src = game.get("source")
@@ -166,14 +170,34 @@ def versions(game):
         for rel in releases:
             if rel["draft"] or rel["prerelease"]:
                 continue
+            files = {a["name"]: a[link] for a in rel["assets"]}
+            _release_files[(src["repo"], rel["tag_name"])] = files
             wanted = src["asset"].replace("{version}", rel["tag_name"])
-            for asset in rel["assets"]:
-                if asset["name"] == wanted:
-                    found.append((rel["tag_name"], asset[link]))
+            if src.get("manifest") in files:
+                found.append((rel["tag_name"], files[src["manifest"]]))
+            elif wanted in files:
+                found.append((rel["tag_name"], files[wanted]))
         if not found:
             raise LauncherError(f"No release of {src['repo']} has a file named {src['asset']} yet")
         return found
     raise LauncherError(f"Unknown source type: {kind}")
+
+
+# (repo, tag) -> {file name: download URL}, from the last versions() call: where a
+# manifest's files are, without asking GitHub again for each one.
+_release_files = {}
+
+
+def _release_file_url(repo, tag, name):
+    files = _release_files.get((repo, tag))
+    if files is None or name not in files:
+        with _open(f"https://api.github.com/repos/{repo}/releases/tags/{urllib.parse.quote(tag)}") as r:
+            rel = json.load(r)
+        link = "url" if github_token() else "browser_download_url"
+        files = _release_files[(repo, tag)] = {a["name"]: a[link] for a in rel["assets"]}
+    if name not in files:
+        raise LauncherError(f"Release {tag} of {repo} is missing {name}")
+    return files[name]
 
 
 def latest(game):
@@ -205,7 +229,8 @@ def _download(url, path, progress=None):
 
 
 def install(game, version, url, progress=None):
-    """Download `url` (a zip or a bare exe) and make it the installed version.
+    """Download `url` (a zip, a bare exe, or a manifest: see install_manifest) and
+    make it the installed version.
 
     progress(done_bytes, total_bytes_or_0) is called as the download runs.
     """
@@ -219,14 +244,21 @@ def install(game, version, url, progress=None):
     tmp.mkdir(parents=True)
 
     download = tmp / "download.tmp"
-    _download(url, download, progress)
-
-    if zipfile.is_zipfile(download):
-        with zipfile.ZipFile(download) as z:
-            z.extractall(tmp)
-        download.unlink()
-    else:
-        download.rename(tmp / game["exe"])
+    try:
+        _download(url, download, progress)
+        manifest = None if zipfile.is_zipfile(download) else _read_manifest(download)
+        if manifest is not None:
+            download.unlink()
+            install_manifest(game, manifest, tmp, progress)
+        elif zipfile.is_zipfile(download):
+            with zipfile.ZipFile(download) as z:
+                z.extractall(tmp)
+            download.unlink()
+        else:
+            download.rename(tmp / game["exe"])
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
     if not (tmp / game["exe"]).exists():
         shutil.rmtree(tmp, ignore_errors=True)
         raise LauncherError(f"Download did not contain {game['exe']}")
@@ -237,6 +269,135 @@ def install(game, version, url, progress=None):
     for old in game_dir.iterdir():
         if old.is_dir() and old != dest:
             shutil.rmtree(old, ignore_errors=True)  # fails harmlessly if still running
+
+
+# --- Installing from a manifest: only the files that changed ---
+#
+# A manifest (manifest-windows.json, attached to a release) lists every file of the
+# game's folder:
+#   {"format": 1, "version": "v1.2.3", "files": [
+#       {"path": "packs/maps.pck", "size": 123, "sha256": "...",
+#        "release": "v1.2.0", "asset": "0123abcd-maps.pck"}, ...]}
+# Each file is in the release named, under that asset name (a file a release did not
+# change stays where an earlier one put it), or at "url" for other hosts. A file the
+# installed version already has, by its sha256, is hard-linked from there (no second
+# copy on disk); only the rest are downloaded.
+
+MANIFEST_FORMAT = 1
+
+
+def _read_manifest(path):
+    """The manifest in the file at `path`, or None if it is not one (a zip, an exe)."""
+    if path.stat().st_size > 16 * 1024 * 1024:
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("files"), list):
+        return None
+    if data.get("format") != MANIFEST_FORMAT:
+        raise LauncherError("This version needs a newer launcher; update the launcher first")
+    return data
+
+
+def _safe_path(path):
+    """A path inside the game's folder: relative, no "..", no drive."""
+    if not isinstance(path, str) or not path or "\\" in path or ":" in path:
+        return False
+    parts = path.split("/")
+    return parts[0] != "" and ".." not in parts and "" not in parts and path != "manifest.json"
+
+
+def _check_entry(e):
+    if not (isinstance(e, dict) and _safe_path(e.get("path"))
+            and isinstance(e.get("size"), int) and e["size"] >= 0
+            and isinstance(e.get("sha256"), str) and re.fullmatch(r"[0-9a-f]{64}", e["sha256"])):
+        raise LauncherError(f"The release's file list is damaged ({e!r:.80})")
+
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(1024 * 1024):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _link_or_copy(source, target):
+    try:
+        os.link(source, target)
+    except OSError:  # (another drive, or one without hard links)
+        shutil.copy2(source, target)
+
+
+def _manifest_file_url(game, e):
+    src = game.get("source") or {}
+    if src.get("type") == "github_release" and e.get("release") and e.get("asset"):
+        return _release_file_url(src["repo"], e["release"], e["asset"])
+    if e.get("url"):
+        return e["url"]
+    raise LauncherError(f"The release's file list does not say where {e['path']} is")
+
+
+def install_manifest(game, manifest, folder, progress=None):
+    """Fill `folder` with every file `manifest` lists: from the installed version when
+    it has the same bytes, else downloaded (and checked against its sha256).
+
+    progress(done_bytes, total_bytes) counts the downloads only.
+    """
+    files = manifest["files"]
+    for e in files:
+        _check_entry(e)
+    old = installed_version(game)
+    old_dir = exe_path(game, old).parent if old else None
+    # Files of the installed version that may be reused: where its manifest put each
+    # sha256, and (an install from a zip has no manifest) the same path. Each is hashed
+    # before it is reused, so a damaged file is downloaded again, not carried on.
+    claimed = {}
+    if old_dir:
+        try:
+            before = json.loads((old_dir / "manifest.json").read_text(encoding="utf-8")).get("files", [])
+        except (OSError, ValueError, AttributeError):
+            before = []
+        for e in before:
+            if isinstance(e, dict) and _safe_path(e.get("path")):
+                claimed.setdefault(e.get("sha256"), old_dir / e["path"])
+    hashes = {}
+
+    def reusable(e):
+        for p in (claimed.get(e["sha256"]), old_dir / e["path"] if old_dir else None):
+            if p is not None and p.is_file() and p.stat().st_size == e["size"]:
+                if p not in hashes:
+                    hashes[p] = _sha256(p)
+                if hashes[p] == e["sha256"]:
+                    return p
+        return None
+
+    todo = []
+    for e in files:
+        target = folder / e["path"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source = reusable(e)
+        if source:
+            _link_or_copy(source, target)
+        else:
+            todo.append(e)
+
+    total = sum(e["size"] for e in todo)
+    done = 0
+    for e in todo:
+        part = folder / (e["path"] + ".part")
+        report = (lambda d, _t, base=done: progress(base + d, total)) if progress else None
+        _download(_manifest_file_url(game, e), part, report)
+        if part.stat().st_size != e["size"] or _sha256(part) != e["sha256"]:
+            raise LauncherError(f"{e['path']} arrived damaged; try again")
+        part.rename(folder / e["path"])
+        done += e["size"]
+    if progress:
+        progress(total, total)
+    (folder / "manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    return {"downloaded": len(todo), "reused": len(files) - len(todo), "bytes": total}
 
 
 def uninstall(game):

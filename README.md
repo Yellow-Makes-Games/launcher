@@ -25,6 +25,22 @@ Add an entry to `games.json`:
 
 `{version}` stands for the release tag. The file can be a zip containing the exe, or the exe itself. For other hosts use `{"type": "manifest", "url": "..."}`, where the URL returns `{"version": "v1.2.3", "url": "<zip or exe>"}`.
 
+### Small updates
+
+Add `"manifest": "manifest-windows.json"` to a `github_release` source and a release that has that file is installed from it instead of the zip. Only the files that changed are downloaded (Jumpy Shooty's releases make one: its `tools/release/split_content.py`). The manifest lists every file of the game's folder, and which release holds it under which name:
+
+```json
+{"format": 1, "version": "v1.2.3", "files": [
+  {"path": "packs/maps.pck", "size": 123, "sha256": "...", "release": "v1.2.0", "asset": "0123abcd-maps.pck"}
+]}
+```
+
+- **Reused:** each file the installed version already has, with the same sha256, is hard-linked into the new version's folder, so it isn't copied or downloaded again. Every reused file is hashed first.
+- **Downloaded:** everything else is downloaded and checked against its sha256.
+- **The old zip:** a release without the manifest still installs from the zip.
+
+For other hosts an entry can give a `"url"` instead of `"release"` and `"asset"`.
+
 ### Browser games
 
 A game that is a website goes under `"tabs"`, as a page of links:

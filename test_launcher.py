@@ -1,6 +1,7 @@
 """End-to-end check against a local web server:  python -m unittest -v"""
 import functools
 import gc
+import hashlib
 import http.server
 import io
 import json
@@ -100,6 +101,115 @@ class LauncherTest(unittest.TestCase):
         with self.assertRaises(core.LauncherError):
             core.install(self.game, "v2.0.0", "file:///C:/Windows/notepad.exe")
         self.assertEqual(core.installed_version(self.game), "v1.0.0")
+
+    def publish_manifest(self, version, files):
+        """A release as a manifest: files is {path: bytes}; each is served under its sha256."""
+        entries = []
+        for path, body in files.items():
+            digest = hashlib.sha256(body).hexdigest()
+            (self.site / digest).write_bytes(body)
+            entries.append({"path": path, "size": len(body), "sha256": digest, "url": f"{self.base}/{digest}"})
+        (self.site / f"manifest-{version}.json").write_text(json.dumps({"format": 1, "version": version, "files": entries}))
+        (self.site / "latest.json").write_text(json.dumps({"version": version, "url": f"{self.base}/manifest-{version}.json"}))
+        return entries
+
+    def install_latest(self):
+        """Installs the newest release; returns the URLs downloaded on the way."""
+        with mock.patch("core._download", wraps=core._download) as download:
+            core.install(self.game, *core.latest(self.game))
+        return [c.args[0] for c in download.call_args_list]
+
+    def installed(self, path):
+        return (core.exe_path(self.game, core.installed_version(self.game)).parent / path).read_bytes()
+
+    def test_manifest_downloads_only_what_changed(self):
+        self.publish("v0.1.0")  # an install from a zip, as before manifests
+        core.install(self.game, *core.latest(self.game))
+        music = os.urandom(200_000)
+        v2 = {"Demo.exe": b"build v0.1.0", "Demo.pck": b"code 2", "packs/music.pck": music,
+              "packs/maps.pck": b"maps 2", "packs/thumbs.pck": b"thumbs"}
+        entries = self.publish_manifest("v0.2.0", v2)
+        got = self.install_latest()
+        url = {e["path"]: e["url"] for e in entries}
+        self.assertNotIn(url["Demo.exe"], got)  # the zip install's exe had the same bytes
+        self.assertEqual(len(got), 1 + 4)       # the manifest, and the four new files
+        self.assertEqual(core.installed_version(self.game), "v0.2.0")
+        for path, body in v2.items():
+            self.assertEqual(self.installed(path), body)
+        self.assertIn('"v0.2.0"', self.installed("manifest.json").decode())
+        self.assertFalse(core.exe_path(self.game, "v0.1.0").parent.exists())  # old version removed
+
+        v3 = {**v2, "Demo.pck": b"code 3", "packs/maps.pck": b"maps 3"}
+        del v3["packs/thumbs.pck"]
+        entries = self.publish_manifest("v0.3.0", v3)
+        url = {e["path"]: e["url"] for e in entries}
+        seen = []
+        with mock.patch("core._download", wraps=core._download) as download:
+            core.install(self.game, *core.latest(self.game), lambda d, t: seen.append((d, t)))
+        got = [c.args[0] for c in download.call_args_list]
+        self.assertEqual(sorted(got[1:]), sorted([url["Demo.pck"], url["packs/maps.pck"]]))
+        self.assertEqual(seen[-1], (12, 12))  # progress counts the two small downloads
+        for path, body in v3.items():
+            self.assertEqual(self.installed(path), body)
+        folder = core.exe_path(self.game, "v0.3.0").parent
+        self.assertFalse((folder / "packs/thumbs.pck").exists())  # the release dropped it
+        self.assertEqual(sorted(p.name for p in folder.rglob("*.part")), [])
+
+    def test_manifest_fixes_a_damaged_file(self):
+        body = os.urandom(50_000)
+        entries = self.publish_manifest("v1.0.0", {"Demo.exe": b"exe", "packs/a.pck": body})
+        self.install_latest()
+        folder = core.exe_path(self.game, "v1.0.0").parent
+        with open(folder / "packs/a.pck", "r+b") as f:
+            f.write(b"\0" * 8)  # the same size, other bytes
+        self.publish_manifest("v1.0.1", {"Demo.exe": b"exe", "packs/a.pck": body})
+        got = self.install_latest()
+        self.assertIn(entries[1]["url"], got)
+        self.assertEqual(self.installed("packs/a.pck"), body)
+
+    def test_manifest_refuses_bad_files_and_keeps_the_install(self):
+        self.publish_manifest("v1.0.0", {"Demo.exe": b"exe 1"})
+        self.install_latest()
+        entries = self.publish_manifest("v2.0.0", {"Demo.exe": b"exe 2"})
+        manifest = {"format": 1, "version": "v2.0.0", "files": [{**entries[0], "sha256": "0" * 64}]}
+        (self.site / "bad.json").write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(core.LauncherError, "damaged"):
+            core.install(self.game, "v2.0.0", f"{self.base}/bad.json")
+        for path in ("../evil.exe", "/evil.exe", "C:/evil.exe", "a\\..\\b", "manifest.json"):
+            manifest["files"] = [{**entries[0], "path": path}]
+            (self.site / "bad.json").write_text(json.dumps(manifest))
+            with self.assertRaises(core.LauncherError, msg=path):
+                core.install(self.game, "v2.0.0", f"{self.base}/bad.json")
+        (self.site / "bad.json").write_text(json.dumps({**manifest, "format": 2}))
+        with self.assertRaisesRegex(core.LauncherError, "newer launcher"):
+            core.install(self.game, "v2.0.0", f"{self.base}/bad.json")
+        self.assertEqual(core.installed_version(self.game), "v1.0.0")
+        self.assertEqual(self.installed("Demo.exe"), b"exe 1")
+        self.assertEqual([p.name for p in core.home().joinpath("demo").iterdir() if p.name.endswith(".part")], [])
+
+    def test_github_release_prefers_the_manifest(self):
+        def rel(tag, files):
+            return {"tag_name": tag, "draft": False, "prerelease": False,
+                    "assets": [{"name": f, "browser_download_url": f"https://x/{tag}/{f}"} for f in files]}
+        releases = [rel("v0.3.0", ["manifest-windows.json", "Demo-v0.3.0.zip", "ab-maps.pck"]),
+                    rel("v0.2.0", ["Demo-v0.2.0.zip"])]
+        game = {**self.game, "source": {"type": "github_release", "repo": "o/r", "asset": "Demo-{version}.zip",
+                                        "manifest": "manifest-windows.json"}}
+        with mock.patch("core._open", return_value=io.BytesIO(json.dumps(releases).encode())):
+            self.assertEqual(core.versions(game), [("v0.3.0", "https://x/v0.3.0/manifest-windows.json"),
+                                                   ("v0.2.0", "https://x/v0.2.0/Demo-v0.2.0.zip")])
+        # A file of a release in that listing needs no more asking; one of an older release does.
+        with mock.patch("core._open") as opened:
+            self.assertEqual(core._manifest_file_url(game, {"path": "packs/maps.pck", "release": "v0.3.0",
+                                                            "asset": "ab-maps.pck"}), "https://x/v0.3.0/ab-maps.pck")
+            opened.assert_not_called()
+            opened.return_value = io.BytesIO(json.dumps(rel("v0.1.0", ["cd-music.pck"])).encode())
+            self.assertEqual(core._manifest_file_url(game, {"path": "packs/music.pck", "release": "v0.1.0",
+                                                            "asset": "cd-music.pck"}), "https://x/v0.1.0/cd-music.pck")
+            self.assertIn("/repos/o/r/releases/tags/v0.1.0", opened.call_args[0][0])
+            opened.return_value = io.BytesIO(json.dumps(releases[0]).encode())  # (asked again: still not there)
+            with self.assertRaisesRegex(core.LauncherError, "missing"):
+                core._manifest_file_url(game, {"path": "x", "release": "v0.3.0", "asset": "missing.pck"})
 
     def test_no_source(self):
         with self.assertRaises(core.NoSource):
