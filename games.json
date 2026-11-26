@@ -42,6 +42,16 @@
         "repo": "Yellow-Makes-Games/bastion",
         "asset": "Bastion-windows-{version}.zip"
       }
+    },
+    {
+      "id": "zhg",
+      "name": "ZHG",
+      "exe": "ZHG.exe",
+      "source": {
+        "type": "github_release",
+        "repo": "Yellow-Makes-Games/zhg",
+        "asset": "ZHG-windows-{version}.zip"
+      }
     }
   ],
   "tabs": [
