@@ -316,6 +316,34 @@ class LauncherTest(unittest.TestCase):
                 app.remove_all()
             self.assertTrue(info.called and not asked.called)  # nothing left to remove
 
+    def test_launcher_checks_for_its_own_update_again_and_on_request(self):
+        import launcher
+        entry = {"name": "Launcher", "source": {"type": "github_release", "repo": "x/launcher", "asset": "L.exe"}}
+        found = [None]  # what the next check finds
+
+        def pump_until(done):
+            deadline = time.time() + 10
+            while not done():
+                self.assertLess(time.time(), deadline)
+                app.update()
+                time.sleep(0.02)
+
+        with mock.patch("core.versions", return_value=[]), mock.patch("core.remove_old_launcher"),                 mock.patch("core.launcher_update", side_effect=lambda e: found[0]) as check,                 mock.patch("launcher.LAUNCHER_CHECK_MS", 300):
+            app = launcher.App([self.game], entry)
+            self.addCleanup(app.destroy)
+            pump_until(lambda: check.call_count >= 1 and not app.launcher_busy)
+            self.assertIsNone(app.launcher_btn)  # up to date: nothing shown, nothing said
+
+            with mock.patch("launcher.messagebox.showinfo") as info:  # asked for: says it is up to date
+                app.check_launcher_now()
+                pump_until(lambda: info.called)
+            self.assertIn("up to date", info.call_args.args[1])
+
+            found[0] = ("v9.0.0", "https://example/L.exe")  # a release appears while the launcher is open
+            pump_until(lambda: app.launcher_btn is not None)
+            self.assertEqual(app.launcher_btn.cget("text"), "Update launcher to v9.0.0")
+            self.assertTrue(app.launcher_btn.visible)
+
     def test_tabs_switch_between_game_and_bastion(self):
         import launcher
         self.publish("v0.1.0")

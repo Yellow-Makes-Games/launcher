@@ -22,6 +22,7 @@ from tkinter import messagebox
 import core
 
 WIDTH, HEIGHT = 960, 540
+LAUNCHER_CHECK_MS = 30 * 60 * 1000  # how often an open launcher looks for a newer version of itself
 HERE = Path(__file__).parent
 ICON = HERE / "icon.ico"
 
@@ -435,9 +436,11 @@ class App(tk.Tk):
             self.show(next(iter(self.pages)))
         self.show_account()
 
+        self.launcher_entry = launcher_entry
+        self.launcher_busy = False  # checking for, or downloading, a launcher update
         if launcher_entry:
             core.remove_old_launcher()
-            self.background(lambda: core.launcher_update(launcher_entry), self.launcher_checked)
+            self.check_launcher()
 
     # Images
 
@@ -597,6 +600,7 @@ class App(tk.Tk):
         self.open_menu(self.more_btn, [
             ("Open game folder", row.open_folder if have else None),
             ("Check for updates", None if row.busy else (lambda: [r.check() for r in self.rows])),
+            ("Check for launcher update", self.check_launcher_now if self.launcher_entry else None),
             ("Remove all installs…", self.remove_all),
         ])
 
@@ -667,21 +671,46 @@ class App(tk.Tk):
             for row in self.rows:
                 row.check()
 
-    def launcher_checked(self, update, error):
+    def check_launcher(self, manual=False):
+        """Look for a newer launcher now, and again every LAUNCHER_CHECK_MS while it stays open."""
+        if not manual:
+            self.after(LAUNCHER_CHECK_MS, self.check_launcher)
+        if self.launcher_busy:
+            return
+        self.launcher_busy = True
+        self.background(lambda: core.launcher_update(self.launcher_entry),
+                        lambda update, error: self.launcher_checked(update, error, manual))
+
+    def check_launcher_now(self):
+        self.check_launcher(manual=True)
+
+    def launcher_checked(self, update, error, manual=False):
+        self.launcher_busy = False
         if error or not update:
-            return  # up to date, running from source, or offline: say nothing
+            if manual:  # asked for: say what happened; otherwise stay quiet
+                if error:
+                    messagebox.showerror("Launcher update", f"Could not check for a launcher update ({error}).",
+                                         parent=self)
+                else:
+                    messagebox.showinfo("Launcher update",
+                                        f"The launcher is up to date ({core.app_version()}).", parent=self)
+            return
         version, url = update
+        if self.launcher_btn:
+            self.launcher_btn.hide()  # an older update was found before; offer the newest
         self.launcher_btn = Button(self, f"Update launcher to {version}", lambda: self.update_launcher(version, url),
                                    kind="accent", height=32, font=(FONT, 9, "bold"), radius=8)
         self.place_top_right()
 
     def update_launcher(self, version, url):
+        self.launcher_busy = True
         self.launcher_btn.config(state="disabled", text=f"Downloading launcher {version}…")
         self.place_top_right()
         self.background(lambda: core.replace_self_and_restart(url), self.launcher_replaced)
 
     def launcher_replaced(self, _result, error):
         if error:
+            self.launcher_busy = False
             self.launcher_btn.config(state="normal", text="Launcher update failed; try again")
             self.place_top_right()
             messagebox.showerror("Update launcher", str(error), parent=self)
