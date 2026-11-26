@@ -12,6 +12,7 @@ import os
 import queue
 import struct
 import threading
+import time
 import webbrowser
 import zlib
 from pathlib import Path
@@ -20,6 +21,7 @@ import tkinter.font as tkfont
 from tkinter import messagebox
 
 import core
+import minigame
 
 WIDTH, HEIGHT = 960, 540
 HERE = Path(__file__).parent
@@ -407,6 +409,9 @@ class App(tk.Tk):
 
         self.version_text = c.create_text(0, 30, anchor="e", fill=FAINT, font=(FONT, 9),
                                           text=f"Launcher {core.app_version()}")
+        # Hidden: five quick clicks on the version open the minigame.
+        self.egg_clicks, self.minigame = [], None
+        c.tag_bind(self.version_text, "<ButtonRelease-1>", lambda e: self.version_clicked())
         self.account_btn = Button(self, "", self.account_clicked, height=32, font=(FONT, 9, "bold"), radius=8)
         self.launcher_btn = None
         self.place_top_right()
@@ -619,6 +624,18 @@ class App(tk.Tk):
                 row.changed()
 
     # Top right: the launcher's own version and update, and the GitHub account
+
+    def version_clicked(self):
+        now = time.monotonic()
+        self.egg_clicks = [t for t in self.egg_clicks if now - t < 2] + [now]
+        if len(self.egg_clicks) < 5:
+            return
+        self.egg_clicks = []
+        if self.minigame is not None and self.minigame.winfo_exists():
+            self.minigame.lift()
+            self.minigame.focus_force()
+        else:
+            self.minigame = minigame.StarCatcher(self)
 
     def place_top_right(self):
         x = self.account_btn.place(WIDTH - 32 - self.account_btn.width, 14) - self.account_btn.width - 16
