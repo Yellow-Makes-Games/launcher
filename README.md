@@ -43,7 +43,7 @@ For other hosts an entry can give a `"url"` instead of `"release"` and `"asset"`
 
 ### Playtest channels
 
-Add `"prerelease": true` to a `github_release` source and the entry offers only the repo's prereleases, skipping its normal releases (which stay with the entry without it). Jumpy Shooty's `playtest` branch releases `pt-v…` prereleases, so **Jumpy Shooty Playtest** is a second entry with the same repo: its own tab, installed to its own folder beside the normal game.
+Add `"prerelease": true` to a `github_release` source and the entry offers only the repo's prereleases, skipping its normal releases (which stay with the entry without it). Jumpy Shooty's `playtest` branch releases `pt-v…` prereleases, so **Jumpy Shooty Playtest** is a second entry with the same repo, installed to its own folder beside the normal game. Its `"page": "Jumpy Shooty"` shows it on the game's page instead of a tab of its own: a line under the game's buttons, labelled by its `"channel"` ("Playtest"), with its own Install, Update and Play buttons.
 
 ### Browser games
 

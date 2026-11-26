@@ -378,7 +378,9 @@ class App(tk.Tk):
         # Top bar: one tab per page, then the launcher's own version, update and account.
         self.pages = {}  # name -> {"row": GameRow or None, "links": [Button], "art": path or None}
         for game in games:
-            self.pages[game["name"]] = {"row": None, "links": [], "art": game.get("background"), "game": game}
+            if "page" not in game:
+                self.pages[game["name"]] = {"row": None, "links": [], "art": game.get("background"), "game": game,
+                                            "channels": []}
         for tab in tabs:  # a tab named like a game adds its links to the game's page
             page = self.pages.setdefault(tab["name"], {"row": None, "links": [], "art": tab.get("background")})
             # Under a game's own buttons links are small; on a page of their own they are the big buttons.
@@ -431,6 +433,18 @@ class App(tk.Tk):
             if "game" in page:
                 page["row"] = GameRow(self, page["game"])
                 self.rows.append(page["row"])
+        # "page": a second build of a game (e.g. its playtest), shown under that game's buttons.
+        for game in games:
+            if "page" in game:
+                page = self.pages[game["page"]]
+                name = game.get("channel") or game["name"]
+                channel = {"name": name, "text": c.create_text(48, 470, anchor="nw", text="", fill=MUTED,
+                                                               font=(FONT, 9, "bold"), state="hidden"),
+                           "play": Button(self, f"▶   Play {name.lower()}", None, height=36, font=(FONT, 9, "bold")),
+                           "install": Button(self, "", None, height=36, font=(FONT, 9, "bold"))}
+                channel["row"] = GameRow(self, game)
+                page["channels"].append(channel)
+                self.rows.append(channel["row"])
         if self.pages:
             self.show(next(iter(self.pages)))
         self.show_account()
@@ -507,7 +521,8 @@ class App(tk.Tk):
 
     def refresh(self, row):
         """A game's state changed; redraw if it is the one showing."""
-        if self.current and self.pages[self.current]["row"] is row:
+        page = self.pages.get(self.current) if self.current else None
+        if page and (page["row"] is row or any(ch["row"] is row for ch in page.get("channels", ()))):
             self.draw()
 
     def draw(self):
@@ -520,6 +535,11 @@ class App(tk.Tk):
         c.itemconfigure(self.status, text=row.status if row else page["note"])
         for button in (self.primary, self.secondary, self.version_btn, self.more_btn):
             button.hide()
+        for other in self.pages.values():
+            for ch in other.get("channels", ()):
+                ch["play"].hide()
+                ch["install"].hide()
+                c.itemconfigure(ch["text"], state="hidden")
 
         x, y, gap = 48, 358, 12
         links = page["links"]
@@ -565,8 +585,31 @@ class App(tk.Tk):
             c.itemconfigure(self.progress_text, text="")
 
         x = 48
+        for ch in page["channels"]:  # one line each: name and status, then its own play / install
+            x = self.draw_channel(ch, x) + 24
         for button in links:
-            x = button.place(x, HEIGHT - 72) + 10
+            x = button.place(x, HEIGHT - (58 if page["channels"] else 72)) + 10
+
+    def draw_channel(self, ch, x):
+        """A second build under the game's buttons, e.g. its playtest; returns its right edge."""
+        c, row = self.canvas, ch["row"]
+        status = row.status
+        if row.progress is not None:
+            done, total = row.progress
+            status = f"Downloading · {done / total:.0%}" if total else f"Downloading · {done / 2**20:.0f} MB"
+        c.itemconfigure(ch["text"], text=f"{ch['name'].upper()}  ·  {status}", state="normal")
+        c.coords(ch["text"], x, HEIGHT - 80)
+        right = x
+        have = core.installed_version(row.game)
+        if have:
+            ch["play"].config(command=row.play, state="disabled" if row.busy else "normal")
+            right = ch["play"].place(x, HEIGHT - 58) + 10
+        label, possible = row.action()
+        if not have or (row.versions and row.versions[0][0] != have):
+            ch["install"].config(text=f"{label} {ch['name'].lower()}", command=row.start_install,
+                                 state="normal" if possible else "disabled")
+            right = ch["install"].place(right, HEIGHT - 58) + 10
+        return max(right, x + c.bbox(ch["text"])[2] - c.bbox(ch["text"])[0])
 
     # Menus
 
