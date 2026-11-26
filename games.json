@@ -31,7 +31,9 @@
         "asset": "JumpyShooty-windows-{version}.zip",
         "manifest": "manifest-windows.json",
         "prerelease": true
-      }
+      },
+      "page": "Jumpy Shooty",
+      "channel": "Playtest"
     },
     {
       "id": "bastion",

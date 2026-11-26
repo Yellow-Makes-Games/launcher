@@ -260,7 +260,8 @@ class LauncherTest(unittest.TestCase):
         games = {g["id"]: g for g in core.load_games()}
         self.assertTrue(games["jumpy-shooty-playtest"]["source"]["prerelease"])
         self.assertFalse(games["jumpy-shooty"]["source"].get("prerelease", False))
-        self.assertEqual(len({g["name"] for g in games.values()}), len(games))  # one tab each
+        self.assertEqual(games["jumpy-shooty-playtest"]["page"], "Jumpy Shooty")  # no tab of its own
+        self.assertEqual(len({g["name"] for g in games.values()}), len(games))
 
     def wait_for(self, app, row, text):
         deadline = time.time() + 10
@@ -315,6 +316,30 @@ class LauncherTest(unittest.TestCase):
                     mock.patch("launcher.messagebox.askyesno") as asked:
                 app.remove_all()
             self.assertTrue(info.called and not asked.called)  # nothing left to remove
+
+    def test_playtest_installs_from_the_game_page(self):
+        import launcher
+        self.publish("v0.1.0")
+        self.publish("pt-v0.1.1")
+        playtest = {**self.game, "id": "demo-playtest", "name": "Demo Playtest", "page": "Demo", "channel": "Playtest"}
+        offered = {"demo": [("v0.1.0", f"{self.base}/Demo-v0.1.0.zip")],
+                   "demo-playtest": [("pt-v0.1.1", f"{self.base}/Demo-pt-v0.1.1.zip")]}
+        with mock.patch("core.versions", side_effect=lambda g: offered[g["id"]]):
+            app = launcher.App([self.game, playtest])
+            self.addCleanup(app.destroy)
+            self.assertEqual(list(app.tabs), ["Demo"])  # the playtest is not a tab
+            ch, = app.pages["Demo"]["channels"]
+            self.wait_for(app, ch["row"], "Not installed · latest is pt-v0.1.1")
+            self.assertIn("PLAYTEST  ·  Not installed", app.canvas.itemcget(ch["text"], "text"))
+            self.assertFalse(ch["play"].visible)
+            self.assertEqual(ch["install"].cget("text"), "Install playtest")
+            ch["install"].invoke()
+            self.wait_for(app, ch["row"], "Installed pt-v0.1.1 · up to date")
+            self.assertTrue(ch["play"].visible)
+            self.assertFalse(ch["install"].visible)
+            self.assertEqual(core.exe_path(playtest, "pt-v0.1.1").read_bytes(), b"build pt-v0.1.1")
+            self.assertIsNone(core.installed_version(self.game))  # the normal game is separate
+            self.assertEqual(app.primary.cget("text"), "INSTALL")
 
     def test_tabs_switch_between_game_and_bastion(self):
         import launcher
