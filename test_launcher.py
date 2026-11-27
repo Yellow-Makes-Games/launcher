@@ -316,6 +316,32 @@ class LauncherTest(unittest.TestCase):
                 app.remove_all()
             self.assertTrue(info.called and not asked.called)  # nothing left to remove
 
+    def test_five_clicks_on_the_version_open_the_minigame(self):
+        import launcher
+        with mock.patch("core.versions", return_value=[]):
+            app = launcher.App([self.game])
+        self.addCleanup(app.destroy)
+        for _ in range(4):
+            app.version_clicked()
+        self.assertIsNone(app.minigame)  # four is not enough
+        app.version_clicked()
+        game = app.minigame
+        self.assertTrue(game.winfo_exists())
+        app.version_clicked(); [app.version_clicked() for _ in range(4)]
+        self.assertIs(app.minigame, game)  # brought back, not a second window
+
+        game.held.add("right")
+        for _ in range(30):
+            game.step()
+        self.assertGreater(game.x, 240)  # moved right
+        game.lives = 0
+        game.score = 7
+        game.step()
+        self.assertTrue(game.over)
+        self.assertEqual((core.home() / "minigame-best.txt").read_text(), "7")
+        game.restart()
+        self.assertEqual((game.score, game.lives, game.over, game.best), (0, 3, False, 7))
+
     def test_tabs_switch_between_game_and_bastion(self):
         import launcher
         self.publish("v0.1.0")
